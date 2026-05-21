@@ -765,7 +765,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                         val wifiText = if (!isAutoTrackingEnabled) {
                             "Auto-tracking Disabled"
                         } else if (isWorkWifiConnected) {
-                            "✓ Work WiFi — $currentSsid"
+                            "Connected - $currentSsid"
                         } else if (currentSsid != null) {
                             "✗ Not on work WiFi ($currentSsid)"
                         } else {

@@ -52,7 +52,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.PauseCircleFilled
+import androidx.compose.material.icons.outlined.PlayCircleFilled
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Timer
@@ -63,6 +66,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -132,13 +136,13 @@ class MainActivity : ComponentActivity() {
 }
 
 enum class NavigationTab {
-    Manual,
-    Session
+    AutoTracking,
+    ManualTracking
 }
 
 @Composable
 fun MainContainer(viewModel: WorkViewModel) {
-    var selectedTab by remember { mutableStateOf(NavigationTab.Session) }
+    var selectedTab by remember { mutableStateOf(NavigationTab.AutoTracking) }
     val context = LocalContext.current
 
     // Permissions check
@@ -187,8 +191,8 @@ fun MainContainer(viewModel: WorkViewModel) {
                 label = "TabTransition"
             ) { tab ->
                 when (tab) {
-                    NavigationTab.Manual -> ManualScreen(viewModel)
-                    NavigationTab.Session -> SessionScreen(viewModel)
+                    NavigationTab.AutoTracking -> SessionScreen(viewModel)
+                    NavigationTab.ManualTracking -> ManualScreen(viewModel)
                 }
             }
         }
@@ -214,55 +218,55 @@ fun CustomBottomNavigation(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Manual Navigation Button
-            val isManualSelected = selectedTab == NavigationTab.Manual
+            // Auto Tracking Navigation Button
+            val isAutoSelected = selectedTab == NavigationTab.AutoTracking
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clickable { onTabSelected(NavigationTab.Manual) }
-                    .padding(vertical = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Keyboard,
-                    contentDescription = "Manual tab icon",
-                    tint = if (isManualSelected) AccentGreen else MutedText,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = "Manual",
-                    color = if (isManualSelected) AccentGreen else MutedText,
-                    fontSize = 10.sp,
-                    fontWeight = if (isManualSelected) FontWeight.Bold else FontWeight.Medium
-                )
-            }
-
-            // Session Navigation Button
-            val isSessionSelected = selectedTab == NavigationTab.Session
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clickable { onTabSelected(NavigationTab.Session) }
+                    .clickable { onTabSelected(NavigationTab.AutoTracking) }
                     .padding(vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Timer,
-                    contentDescription = "Session tab icon",
-                    tint = if (isSessionSelected) AccentGreen else MutedText,
+                    contentDescription = "Auto tracking tab icon",
+                    tint = if (isAutoSelected) AccentGreen else MutedText,
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "Session",
-                    color = if (isSessionSelected) AccentGreen else MutedText,
+                    text = "Auto Tracking",
+                    color = if (isAutoSelected) AccentGreen else MutedText,
                     fontSize = 10.sp,
-                    fontWeight = if (isSessionSelected) FontWeight.Bold else FontWeight.Medium
+                    fontWeight = if (isAutoSelected) FontWeight.Bold else FontWeight.Medium
+                )
+            }
+
+            // Manual Tracking Navigation Button
+            val isManualSelected = selectedTab == NavigationTab.ManualTracking
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable { onTabSelected(NavigationTab.ManualTracking) }
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Keyboard,
+                    contentDescription = "Manual tracking tab icon",
+                    tint = if (isManualSelected) AccentGreen else MutedText,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = "Manual Tracking",
+                    color = if (isManualSelected) AccentGreen else MutedText,
+                    fontSize = 10.sp,
+                    fontWeight = if (isManualSelected) FontWeight.Bold else FontWeight.Medium
                 )
             }
         }
@@ -294,31 +298,16 @@ fun ManualScreen(viewModel: WorkViewModel) {
         ) {
             Column {
                 Text(
-                    text = "Work Time Calc.",
+                    text = "Manual Tracking",
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextWhite,
                     letterSpacing = (-0.5).sp
                 )
                 Text(
-                    text = "\"You never know 'when!'\"",
+                    text = "Log your entries manually",
                     fontSize = 13.sp,
-                    fontStyle = FontStyle.Italic,
                     color = MutedText
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .background(Color(0x1A10B981), RoundedCornerShape(100.dp))
-                    .border(1.dp, Color(0x3310B981), RoundedCornerShape(100.dp))
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = "SDK 52 • 2026",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentGreen,
-                    letterSpacing = 1.sp
                 )
             }
         }
@@ -651,7 +640,7 @@ fun showTimePicker(context: Context, currentTime: String, onTimeSelected: (Strin
 }
 
 
-// ---------------- SESSION SCREEN ----------------
+// ---------------- SESSION SCREEN (Auto Tracking) ----------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionScreen(viewModel: WorkViewModel) {
@@ -660,6 +649,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
     val currentSsid by viewModel.currentSsid.collectAsState()
     val lastCheckedTime by viewModel.lastCheckedTime.collectAsState()
     val liveActiveSeconds by viewModel.liveActiveElapsedSeconds.collectAsState()
+    val isAutoTrackingEnabled by viewModel.isAutoTrackingEnabled.collectAsState()
 
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -693,11 +683,11 @@ fun SessionScreen(viewModel: WorkViewModel) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
                 Text(
-                    text = "Session Tracker",
+                    text = "Auto Tracking",
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextWhite,
@@ -707,6 +697,17 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     text = "Auto-tracks via WiFi · Manual override",
                     fontSize = 13.sp,
                     color = MutedText
+                )
+            }
+            
+            IconButton(
+                onClick = { viewModel.toggleAutoTracking() }
+            ) {
+                Icon(
+                    imageVector = if (isAutoTrackingEnabled) Icons.Outlined.PauseCircleFilled else Icons.Outlined.PlayCircleFilled,
+                    contentDescription = if (isAutoTrackingEnabled) "Stop auto-tracking" else "Start auto-tracking",
+                    tint = if (isAutoTrackingEnabled) Color.Red else AccentGreen,
+                    modifier = Modifier.size(36.dp)
                 )
             }
         }
@@ -753,15 +754,17 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     Box(
                         modifier = Modifier
                             .size(10.dp)
-                            .alpha(if (isWorkWifiConnected) pulseAlpha else 1.0f)
+                            .alpha(if (isWorkWifiConnected && isAutoTrackingEnabled) pulseAlpha else 1.0f)
                             .background(
-                                color = if (isWorkWifiConnected) AccentGreen else Color.Red,
+                                color = if (!isAutoTrackingEnabled) Color.Gray else if (isWorkWifiConnected) AccentGreen else Color.Red,
                                 shape = CircleShape
                             )
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        val wifiText = if (isWorkWifiConnected) {
+                        val wifiText = if (!isAutoTrackingEnabled) {
+                            "Auto-tracking Disabled"
+                        } else if (isWorkWifiConnected) {
                             "✓ Work WiFi — $currentSsid"
                         } else if (currentSsid != null) {
                             "✗ Not on work WiFi ($currentSsid)"
@@ -772,7 +775,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                             text = wifiText,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isWorkWifiConnected) AccentGreen else Color.Red
+                            color = if (!isAutoTrackingEnabled) MutedText else if (isWorkWifiConnected) AccentGreen else Color.Red
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -1152,61 +1155,130 @@ fun SessionScreen(viewModel: WorkViewModel) {
                         colors = CardDefaults.cardColors(containerColor = itemBg),
                         border = androidx.compose.foundation.BorderStroke(1.dp, itemBorder)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Left accent bar
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    // Left accent bar
+                                    Box(
+                                        modifier = Modifier
+                                            .width(3.dp)
+                                            .height(40.dp)
+                                            .background(if (isOpen) AccentGreen else Color(0x40FFFFFF), CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = "Session $sessionNumber",
+                                            fontSize = 12.sp,
+                                            color = MutedText,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = TimeUtils.fmtDur(durationMin),
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isOpen) AccentGreen else TextWhite
+                                        )
+                                    }
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isOpen) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color(0x3310B981), RoundedCornerShape(100.dp))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("ONGOING", fontSize = 9.sp, color = AccentGreen, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    IconButton(onClick = {
+                                        showDeleteConfirmation(context) {
+                                            viewModel.deleteSession(session)
+                                        }
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Delete,
+                                            contentDescription = "Delete session",
+                                            tint = Color.Red.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(10.dp))
+                            
+                            // In/Out Pills
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                // IN Pill
                                 Box(
                                     modifier = Modifier
-                                        .width(3.dp)
-                                        .height(40.dp)
-                                        .background(if (isOpen) AccentGreen else Color(0x40FFFFFF), CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    val inStr = TimeUtils.fmtTimestamp(session.inTime)
-                                    val outStr = if (isOpen) "Now" else TimeUtils.fmtTimestamp(session.outTime!!)
-                                    Text(
-                                        text = "$inStr — $outStr",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextWhite
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = if (isOpen) {
-                                            "Session $sessionNumber • Active"
-                                        } else {
-                                            "Session $sessionNumber"
-                                        },
-                                        fontSize = 10.sp,
-                                        color = MutedText,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                        .background(Color(0x1A10B981), RoundedCornerShape(8.dp))
+                                        .border(1.dp, Color(0x3310B981), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(modifier = Modifier.size(6.dp).background(AccentGreen, CircleShape))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "IN: ${TimeUtils.fmtTimestamp(session.inTime)}",
+                                            fontSize = 11.sp,
+                                            color = TextWhite,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.width(8.dp))
+                                
+                                // OUT Pill
+                                Box(
+                                    modifier = Modifier
+                                        .background(if (isOpen) Color(0x1AFFFFFF) else Color(0x1AF87171), RoundedCornerShape(8.dp))
+                                        .border(1.dp, if (isOpen) Color(0x33FFFFFF) else Color(0x33F87171), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(modifier = Modifier.size(6.dp).background(if (isOpen) MutedText else Color.Red, CircleShape))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isOpen) "OUT: --" else "OUT: ${TimeUtils.fmtTimestamp(session.outTime!!)}",
+                                            fontSize = 11.sp,
+                                            color = TextWhite,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                             }
 
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = TimeUtils.fmtDur(durationMin),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isOpen) AccentGreen else TextWhite
-                                )
-                                Text(
-                                    text = if (isOpen) "ONGOING" else "COMPLETED",
-                                    fontSize = 9.sp,
-                                    color = if (isOpen) AccentGreen else HintText,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            // If not the first entry, show "Outside" time pill
+                            if (index < sessions.size - 1) {
+                                val nextSession = sessions[index + 1]
+                                if (nextSession.outTime != null) {
+                                    val outsideMin = ((session.inTime - nextSession.outTime!!) / 60000).toInt()
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color(0x0DFFFFFF), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "☕ Outside for ${TimeUtils.fmtDur(outsideMin)}",
+                                            fontSize = 10.sp,
+                                            color = MutedText,
+                                            fontStyle = FontStyle.Italic
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1239,6 +1311,21 @@ fun showClearConfirmation(context: Context, onConfirmed: () -> Unit) {
         .setTitle("Clear Daily Data?")
         .setMessage("Are you sure you want to clear all logged sessions for today?")
         .setPositiveButton("Clear") { dialog, _ ->
+            onConfirmed()
+            dialog.dismiss()
+        }
+        .setNegativeButton("Cancel") { dialog, _ ->
+            dialog.dismiss()
+        }
+        .show()
+}
+
+// Dialog helper for individual session deletion
+fun showDeleteConfirmation(context: Context, onConfirmed: () -> Unit) {
+    AlertDialog.Builder(context)
+        .setTitle("Delete Session?")
+        .setMessage("Are you sure you want to remove this session entry?")
+        .setPositiveButton("Delete") { dialog, _ ->
             onConfirmed()
             dialog.dismiss()
         }

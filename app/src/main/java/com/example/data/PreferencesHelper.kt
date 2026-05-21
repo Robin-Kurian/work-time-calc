@@ -12,6 +12,7 @@ class PreferencesHelper(context: Context) {
         private const val KEY_LUNCH_IN = "wtc_li"
         private const val KEY_WORK_SSID = "work_ssid"
         private const val KEY_TRACKED_DAY = "s_day"
+        private const val KEY_AUTO_TRACKING = "auto_tracking_enabled"
     }
 
     var arrivalTime: String
@@ -33,4 +34,8 @@ class PreferencesHelper(context: Context) {
     var trackedDay: String
         get() = prefs.getString(KEY_TRACKED_DAY, "") ?: ""
         set(value) = prefs.edit().putString(KEY_TRACKED_DAY, value).apply()
+
+    var isAutoTrackingEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_TRACKING, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_TRACKING, value).apply()
 }

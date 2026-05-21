@@ -46,6 +46,9 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     private val _lastCheckedTime = MutableStateFlow("")
     val lastCheckedTime = _lastCheckedTime.asStateFlow()
 
+    private val _isAutoTrackingEnabled = MutableStateFlow(prefs.isAutoTrackingEnabled)
+    val isAutoTrackingEnabled = _isAutoTrackingEnabled.asStateFlow()
+
     // Real-time ticking relative elapsed timer since last Punch In
     private val _liveActiveElapsedSeconds = MutableStateFlow(0L)
     val liveActiveElapsedSeconds = _liveActiveElapsedSeconds.asStateFlow()
@@ -116,6 +119,12 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         checkWifiConnectionInstant()
     }
 
+    fun toggleAutoTracking() {
+        val newState = !_isAutoTrackingEnabled.value
+        _isAutoTrackingEnabled.value = newState
+        prefs.isAutoTrackingEnabled = newState
+    }
+
     fun setConnectedAsWork() {
         val current = _currentSsid.value
         if (!current.isNullOrEmpty()) {
@@ -143,24 +152,43 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     // Trigger Wi-Fi connection check instantly
     fun checkWifiConnectionInstant() {
         viewModelScope.launch {
-            val ssid = getActiveWifiSsid(getApplication())
-            _currentSsid.value = ssid
+            val context = getApplication<Application>()
+            val ssid = getActiveWifiSsid(context)
+            val isCurrentlyOnWifi = isActuallyOnWifi(context)
+
+            val currentS = _sessions.value
+            val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
+            val targetSsid = workSsid.value
+
+            // UI Label Fix: If system hides SSID name in background but we are still on WiFi
+            // and currently Punched In, we "assume" it's still the work WiFi for the UI display.
+            if (ssid == null && isCurrentlyOnWifi && isIn) {
+                _currentSsid.value = targetSsid
+            } else {
+                _currentSsid.value = ssid
+            }
+
             _lastCheckedTime.value = SimpleDateFormat("h:mm a", Locale.US).format(Date())
 
-            // Auto punch tracking if Work SSID matches
-            val targetSsid = workSsid.value
-            if (targetSsid.isNotEmpty()) {
-                val currentS = _sessions.value
-                val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
-                
-                if (ssid == targetSsid && !isIn) {
-                    // Auto punch IN
-                    punch()
-                } else if (ssid != targetSsid && isIn) {
-                    // Auto punch OUT
-                    // Only auto-punch out if we were on the work WiFi and now we're not
-                    // This avoids accidental punch outs if WiFi flickers briefly
-                    punch()
+            // Auto punch tracking if auto-tracking is enabled
+            if (_isAutoTrackingEnabled.value) {
+                if (targetSsid.isNotEmpty()) {
+                    if (ssid == targetSsid && !isIn) {
+                        // 1. Auto punch IN (Certain match)
+                        punch()
+                    } else if (isIn) {
+                        // We are clocked in. Should we clock out?
+                        // ONLY clock out if:
+                        // A) We see a DIFFERENT identifiable WiFi (not null, not target)
+                        // B) We are definitely NOT on WiFi anymore (no transport)
+
+                        val isDifferentIdentifiableWifi = !ssid.isNullOrEmpty() && ssid != targetSsid && ssid != "<unknown ssid>"
+                        val hasLeftWifiEntirely = !isCurrentlyOnWifi
+
+                        if (isDifferentIdentifiableWifi || hasLeftWifiEntirely) {
+                            punch()
+                        }
+                    }
                 }
             }
         }
@@ -233,6 +261,14 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteSession(session: Session) {
+        viewModelScope.launch {
+            sessionDao.deleteSession(session)
+            // Reload just in case
+            checkMidnightAndLoadSessions()
+        }
+    }
+
     fun clearAllSessions() {
         viewModelScope.launch {
             sessionDao.clearAll()
@@ -256,6 +292,17 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         wifiPollJob?.cancel()
     }
 
+    private fun isActuallyOnWifi(context: Context): Boolean {
+        return try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork ?: return false
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun getActiveWifiSsid(context: Context): String? {
         try {
             val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -263,18 +310,17 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
             val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
 
             if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                // For modern Android (SDK 29+), SSID is retrieved differently
                 val wifiInfo = capabilities.transportInfo as? WifiInfo
                 var ssid = wifiInfo?.ssid
 
-                // Fallback to WifiManager for older versions or if transportInfo is null
                 if (ssid == null || ssid == "<unknown ssid>" || ssid == "0x") {
                     val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
                     ssid = wifiManager.connectionInfo?.ssid
                 }
 
-                if (ssid != null && ssid != "<unknown ssid>" && ssid != "0x") {
-                    return ssid.replace("\"", "")
+                val clean = ssid?.replace("\"", "")
+                if (!clean.isNullOrEmpty() && clean != "<unknown ssid>" && clean != "0x") {
+                    return clean
                 }
             }
         } catch (e: Exception) {

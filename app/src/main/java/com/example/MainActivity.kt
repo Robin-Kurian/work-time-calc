@@ -767,9 +767,9 @@ fun SessionScreen(viewModel: WorkViewModel) {
                         } else if (isWorkWifiConnected) {
                             "Connected - $currentSsid"
                         } else if (currentSsid != null) {
-                            "✗ Not on work WiFi ($currentSsid)"
+                            "Not connected ($currentSsid)"
                         } else {
-                            "✗ Not on work WiFi"
+                            "Not connected"
                         }
                         Text(
                             text = wifiText,

@@ -1,0 +1,6 @@
+{
+  "name": "Work Time Calc",
+  "description": "Premium Work Time Tracker styled in Elegant Dark",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

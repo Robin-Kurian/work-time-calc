@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,7 +20,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -79,8 +79,8 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
 
         val lunchDur = Math.max(0, lunchInMin - lunchOutMin)
         val leaveMin = arrivalMin + TimeUtils.REQUIRED_MINUTES + lunchDur
-        val amWork = lunchOutMin - (arrivalMin + TimeUtils.BUFFER_IN)
-        val pmWork = leaveMin - TimeUtils.BUFFER_OUT - lunchInMin
+        val amWork = Math.max(0, lunchOutMin - (arrivalMin + TimeUtils.BUFFER_IN))
+        val pmWork = Math.max(0, leaveMin - TimeUtils.BUFFER_OUT - lunchInMin)
 
         ManualCalcState(
             arrivalMin = arrivalMin,
@@ -114,6 +114,13 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         workSsid.value = ssid
         prefs.workSsid = ssid
         checkWifiConnectionInstant()
+    }
+
+    fun setConnectedAsWork() {
+        val current = _currentSsid.value
+        if (!current.isNullOrEmpty()) {
+            updateWorkSsid(current)
+        }
     }
 
     // Active tracking
@@ -151,6 +158,8 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     punch()
                 } else if (ssid != targetSsid && isIn) {
                     // Auto punch OUT
+                    // Only auto-punch out if we were on the work WiFi and now we're not
+                    // This avoids accidental punch outs if WiFi flickers briefly
                     punch()
                 }
             }
@@ -252,14 +261,20 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
             val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val network = connectivityManager.activeNetwork ?: return null
             val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
+
             if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                val info = wifiManager.connectionInfo
-                if (info != null) {
-                    val ssid = info.ssid
-                    if (ssid != null && ssid != "<unknown ssid>" && ssid != "0x") {
-                        return ssid.replace("\"", "")
-                    }
+                // For modern Android (SDK 29+), SSID is retrieved differently
+                val wifiInfo = capabilities.transportInfo as? WifiInfo
+                var ssid = wifiInfo?.ssid
+
+                // Fallback to WifiManager for older versions or if transportInfo is null
+                if (ssid == null || ssid == "<unknown ssid>" || ssid == "0x") {
+                    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                    ssid = wifiManager.connectionInfo?.ssid
+                }
+
+                if (ssid != null && ssid != "<unknown ssid>" && ssid != "0x") {
+                    return ssid.replace("\"", "")
                 }
             }
         } catch (e: Exception) {

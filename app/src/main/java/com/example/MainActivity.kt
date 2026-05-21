@@ -56,6 +56,7 @@ import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -782,29 +783,43 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     }
                 }
 
-                // Refresh small button
-                Box(
-                    modifier = Modifier
-                        .background(Color(0x1BFFFFFF), RoundedCornerShape(100.dp))
-                        .clickable { viewModel.checkWifiConnectionInstant() }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                // Action Column (Refresh & Set as Work)
+                Column(horizontalAlignment = Alignment.End) {
+                    // Refresh small button
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0x1BFFFFFF), RoundedCornerShape(100.dp))
+                            .clickable { viewModel.checkWifiConnectionInstant() }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Refresh,
-                            contentDescription = "Refresh WiFi status",
-                            tint = TextWhite,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Refresh,
+                                contentDescription = "Refresh WiFi status",
+                                tint = TextWhite,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "REFRESH",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextWhite
+                            )
+                        }
+                    }
+                    
+                    if (currentSsid != null && currentSsid != workSsid) {
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "REFRESH",
-                            fontSize = 9.sp,
+                            text = "Use current WiFi",
+                            color = AccentGreen,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextWhite
+                            modifier = Modifier.clickable { viewModel.setConnectedAsWork() }
                         )
                     }
                 }

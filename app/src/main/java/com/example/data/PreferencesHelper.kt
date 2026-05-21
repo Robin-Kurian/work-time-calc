@@ -27,7 +27,7 @@ class PreferencesHelper(context: Context) {
         set(value) = prefs.edit().putString(KEY_LUNCH_IN, value).apply()
 
     var workSsid: String
-        get() = prefs.getString(KEY_WORK_SSID, "") ?: ""
+        get() = prefs.getString(KEY_WORK_SSID, "ISPG_Staff") ?: "ISPG_Staff"
         set(value) = prefs.edit().putString(KEY_WORK_SSID, value).apply()
 
     var trackedDay: String

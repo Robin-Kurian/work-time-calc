@@ -13,6 +13,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.PreferencesHelper
 import com.example.data.Session
+import com.example.data.Task
+import com.example.data.TaskDao
 import com.example.utils.NotificationHelper
 import com.example.utils.TimeUtils
 import kotlinx.coroutines.Job
@@ -32,8 +34,28 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
     private val sessionDao = db.sessionDao()
+    private val taskDao = db.taskDao()
     private val prefs = PreferencesHelper(application)
     private val notificationHelper = NotificationHelper(application)
+
+    // Pomodoro States
+    private val _pomodoroMode = MutableStateFlow(PomodoroMode.WORK)
+    val pomodoroMode = _pomodoroMode.asStateFlow()
+
+    private val _pomodoroRemainingSeconds = MutableStateFlow(PomodoroMode.WORK.durationMinutes * 60)
+    val pomodoroRemainingSeconds = _pomodoroRemainingSeconds.asStateFlow()
+
+    private val _pomodoroTotalSeconds = MutableStateFlow(PomodoroMode.WORK.durationMinutes * 60)
+    val pomodoroTotalSeconds = _pomodoroTotalSeconds.asStateFlow()
+
+    private val _pomodoroIsRunning = MutableStateFlow(false)
+    val pomodoroIsRunning = _pomodoroIsRunning.asStateFlow()
+
+    private var pomodoroJob: Job? = null
+
+    // Task States
+    private val _tasks = MutableStateFlow<List<Task>>(emptyList())
+    val tasks = _tasks.asStateFlow()
 
     // Manual screen states
     val arrivalTime = MutableStateFlow(prefs.arrivalTime)
@@ -93,6 +115,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         checkMidnightAndLoadSessions()
         startWifiPolling()
         startLiveTimer()
+        loadTasks()
         
         val networkRequest = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
@@ -345,6 +368,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()
         wifiPollJob?.cancel()
         sessionLoadJob?.cancel()
+        pomodoroJob?.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (e: Exception) {
@@ -388,6 +412,85 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         }
         return null
     }
+
+    // Pomodoro logic
+    fun startPomodoro() {
+        if (_pomodoroIsRunning.value) return
+        _pomodoroIsRunning.value = true
+        pomodoroJob?.cancel()
+        pomodoroJob = viewModelScope.launch {
+            while (_pomodoroIsRunning.value && _pomodoroRemainingSeconds.value > 0) {
+                delay(1000)
+                if (_pomodoroIsRunning.value) {
+                    val nextSeconds = _pomodoroRemainingSeconds.value - 1
+                    _pomodoroRemainingSeconds.value = nextSeconds
+                    if (nextSeconds <= 0) {
+                        _pomodoroIsRunning.value = false
+                        val modeName = _pomodoroMode.value.displayName
+                        notificationHelper.sendNotification(
+                            "⏱ Pomodoro Timer Finished",
+                            "Your $modeName session is complete."
+                        )
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    fun pausePomodoro() {
+        _pomodoroIsRunning.value = false
+        pomodoroJob?.cancel()
+    }
+
+    fun resetPomodoro() {
+        pausePomodoro()
+        _pomodoroRemainingSeconds.value = _pomodoroMode.value.durationMinutes * 60
+    }
+
+    fun setPomodoroMode(mode: PomodoroMode) {
+        pausePomodoro()
+        _pomodoroMode.value = mode
+        _pomodoroTotalSeconds.value = mode.durationMinutes * 60
+        _pomodoroRemainingSeconds.value = mode.durationMinutes * 60
+    }
+
+    fun adjustPomodoroTime(amountSeconds: Int) {
+        val current = _pomodoroRemainingSeconds.value
+        val next = Math.max(0, current + amountSeconds)
+        _pomodoroRemainingSeconds.value = next
+        if (next > _pomodoroTotalSeconds.value) {
+            _pomodoroTotalSeconds.value = next
+        }
+    }
+
+    // Tasks logic
+    fun loadTasks() {
+        viewModelScope.launch {
+            taskDao.getTasksFlow().collect {
+                _tasks.value = it
+            }
+        }
+    }
+
+    fun addTask(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            taskDao.insertTask(Task(text = text.trim()))
+        }
+    }
+
+    fun toggleTaskCompletion(task: Task) {
+        viewModelScope.launch {
+            taskDao.updateTask(task.copy(isCompleted = !task.isCompleted))
+        }
+    }
+
+    fun deleteTask(task: Task) {
+        viewModelScope.launch {
+            taskDao.deleteTask(task)
+        }
+    }
 }
 
 data class ManualCalcState(
@@ -397,3 +500,10 @@ data class ManualCalcState(
     val amWork: Int,
     val pmWork: Int
 )
+
+enum class PomodoroMode(val displayName: String, val durationMinutes: Int) {
+    WORK("Work", 25),
+    BREAK_5("Break (5m)", 5),
+    BREAK_10("Break (10m)", 10),
+    BREAK_15("Break (15m)", 15)
+}

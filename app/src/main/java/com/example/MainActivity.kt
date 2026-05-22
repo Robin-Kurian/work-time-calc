@@ -57,6 +57,11 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.ui.window.Dialog
 import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
+import androidx.compose.ui.text.style.TextDecoration
+import com.example.ui.viewmodel.PomodoroMode
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -95,6 +100,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.data.Session
+import com.example.data.Task
 import com.example.ui.theme.AccentGreen
 import com.example.ui.theme.AmberBg
 import com.example.ui.theme.BgDark
@@ -134,7 +140,8 @@ class MainActivity : ComponentActivity() {
 
 enum class NavigationTab {
     AutoTracking,
-    ManualTracking
+    ManualTracking,
+    Focus
 }
 
 @Composable
@@ -190,6 +197,7 @@ fun MainContainer(viewModel: WorkViewModel) {
                 when (tab) {
                     NavigationTab.AutoTracking -> SessionScreen(viewModel)
                     NavigationTab.ManualTracking -> ManualScreen(viewModel)
+                    NavigationTab.Focus -> FocusScreen(viewModel)
                 }
             }
         }
@@ -202,18 +210,23 @@ fun CustomBottomNavigation(
     selectedTab: NavigationTab,
     onTabSelected: (NavigationTab) -> Unit
 ) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     Surface(
-        color = Color(0xFF0A0F0D),
+        color = if (isLandscape) Color.Transparent else Color(0xFF0A0F0D),
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .height(64.dp)
-            .border(width = 1.dp, color = Color(0x1AFFFFFF))
+            .height(if (isLandscape) 48.dp else 64.dp)
+            .let {
+                if (isLandscape) it else it.border(width = 1.dp, color = Color(0x1AFFFFFF))
+            }
     ) {
         Row(
             modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = if (isLandscape) Alignment.Bottom else Alignment.CenterVertically
         ) {
             // Auto Tracking Navigation Button
             val isAutoSelected = selectedTab == NavigationTab.AutoTracking
@@ -222,9 +235,9 @@ fun CustomBottomNavigation(
                     .weight(1f)
                     .fillMaxHeight()
                     .clickable { onTabSelected(NavigationTab.AutoTracking) }
-                    .padding(vertical = 6.dp),
+                    .padding(vertical = if (isLandscape) 2.dp else 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = if (isLandscape) Arrangement.Bottom else Arrangement.Center
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Timer,
@@ -232,7 +245,7 @@ fun CustomBottomNavigation(
                     tint = if (isAutoSelected) AccentGreen else MutedText,
                     modifier = Modifier.size(24.dp)
                 )
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(if (isLandscape) 1.dp else 3.dp))
                 Text(
                     text = "Auto Tracking",
                     color = if (isAutoSelected) AccentGreen else MutedText,
@@ -248,9 +261,9 @@ fun CustomBottomNavigation(
                     .weight(1f)
                     .fillMaxHeight()
                     .clickable { onTabSelected(NavigationTab.ManualTracking) }
-                    .padding(vertical = 6.dp),
+                    .padding(vertical = if (isLandscape) 2.dp else 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = if (isLandscape) Arrangement.Bottom else Arrangement.Center
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Keyboard,
@@ -258,12 +271,38 @@ fun CustomBottomNavigation(
                     tint = if (isManualSelected) AccentGreen else MutedText,
                     modifier = Modifier.size(24.dp)
                 )
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(if (isLandscape) 1.dp else 3.dp))
                 Text(
                     text = "Manual Tracking",
                     color = if (isManualSelected) AccentGreen else MutedText,
                     fontSize = 10.sp,
                     fontWeight = if (isManualSelected) FontWeight.Bold else FontWeight.Medium
+                )
+            }
+
+            // Focus Navigation Button
+            val isFocusSelected = selectedTab == NavigationTab.Focus
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable { onTabSelected(NavigationTab.Focus) }
+                    .padding(vertical = if (isLandscape) 2.dp else 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = if (isLandscape) Arrangement.Bottom else Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Psychology,
+                    contentDescription = "Focus tab icon",
+                    tint = if (isFocusSelected) AccentGreen else MutedText,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.height(if (isLandscape) 1.dp else 3.dp))
+                Text(
+                    text = "Focus",
+                    color = if (isFocusSelected) AccentGreen else MutedText,
+                    fontSize = 10.sp,
+                    fontWeight = if (isFocusSelected) FontWeight.Bold else FontWeight.Medium
                 )
             }
         }
@@ -1674,6 +1713,608 @@ fun EditSessionDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FocusScreen(viewModel: WorkViewModel) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val activity = context as? android.app.Activity
+        val window = activity?.window
+        window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
+        if (window != null) {
+            val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
+            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+            insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        
+        onDispose {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            if (window != null) {
+                val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
+                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+            }
+        }
+    }
+
+    val pomodoroMode by viewModel.pomodoroMode.collectAsState()
+    val remainingSeconds by viewModel.pomodoroRemainingSeconds.collectAsState()
+    val totalSeconds by viewModel.pomodoroTotalSeconds.collectAsState()
+    val isRunning by viewModel.pomodoroIsRunning.collectAsState()
+    val tasks by viewModel.tasks.collectAsState()
+
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    // Formatted minutes and seconds
+    val minutes = remainingSeconds / 60
+    val seconds = remainingSeconds % 60
+    val timeStr = String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    val progress = if (totalSeconds > 0) remainingSeconds.toFloat() / totalSeconds.toFloat() else 0f
+
+    val displayMinutes = if (seconds > 0) minutes + 1 else minutes
+    val dynamicLabel = if (pomodoroMode == PomodoroMode.WORK) {
+        if (displayMinutes > 0) "Work (${displayMinutes}m)" else "Work"
+    } else {
+        "Break (${displayMinutes}m)"
+    }
+
+    if (isLandscape) {
+        // Landscape Mode: Timer display stretched big, side-by-side, no tasks.
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Circular timer on the left
+            Box(
+                modifier = Modifier
+                    .weight(1.2f)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier.size(260.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawArc(
+                            color = Color(0x10FFFFFF),
+                            startAngle = 0f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                        drawArc(
+                            color = AccentGreen,
+                            startAngle = -90f,
+                            sweepAngle = progress * 360f,
+                            useCenter = false,
+                            style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = dynamicLabel,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MutedText
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = timeStr,
+                            fontSize = 56.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextWhite,
+                            letterSpacing = (-1).sp
+                        )
+                    }
+                }
+            }
+
+            // Controls on the right
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Play / Pause and Reset Row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { viewModel.adjustPomodoroTime(-300) },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color(0x0DFFFFFF), CircleShape)
+                            .border(1.dp, CardBorder, CircleShape)
+                    ) {
+                        Text("- 5M", color = MutedText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    IconButton(
+                        onClick = {
+                            if (isRunning) viewModel.pausePomodoro() else viewModel.startPomodoro()
+                        },
+                        modifier = Modifier
+                            .size(64.dp)
+                            .background(if (isRunning) RedBg else AccentGreen.copy(alpha = 0.1f), CircleShape)
+                            .border(1.5.dp, if (isRunning) RedBorder else AccentGreen.copy(alpha = 0.3f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (isRunning) Icons.Outlined.PauseCircleFilled else Icons.Outlined.PlayCircleFilled,
+                            contentDescription = if (isRunning) "Pause timer" else "Start timer",
+                            tint = if (isRunning) LightRed else AccentGreen,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.resetPomodoro() },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(Color(0x1AFFFFFF), CircleShape)
+                            .border(1.dp, CardBorder, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = "Reset timer",
+                            tint = TextWhite,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.adjustPomodoroTime(300) },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color(0x0DFFFFFF), CircleShape)
+                            .border(1.dp, CardBorder, CircleShape)
+                    ) {
+                        Text("+ 5M", color = AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Mode select grid / row
+                Text(
+                    text = "SELECT MODE",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = HintText,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val firstRowModes = listOf(PomodoroMode.WORK, PomodoroMode.BREAK_5)
+                    val secondRowModes = listOf(PomodoroMode.BREAK_10, PomodoroMode.BREAK_15)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        firstRowModes.forEach { mode ->
+                            val isSelected = pomodoroMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (isSelected) AccentGreen else CardBg)
+                                    .border(1.dp, if (isSelected) Color.Transparent else CardBorder, RoundedCornerShape(20.dp))
+                                    .clickable { viewModel.setPomodoroMode(mode) }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = mode.displayName,
+                                    color = if (isSelected) TextWhite else MutedText,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        secondRowModes.forEach { mode ->
+                            val isSelected = pomodoroMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (isSelected) AccentGreen else CardBg)
+                                    .border(1.dp, if (isSelected) Color.Transparent else CardBorder, RoundedCornerShape(20.dp))
+                                    .clickable { viewModel.setPomodoroMode(mode) }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = mode.displayName,
+                                    color = if (isSelected) TextWhite else MutedText,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Portrait Mode: Pomodoro Setup + Task Tracker
+        var newTaskText by remember { mutableStateOf("") }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+        ) {
+            // --- HEADER SECTION ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Column {
+                    Text(
+                        text = "Focus Session",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextWhite,
+                        letterSpacing = (-0.5).sp
+                    )
+                    Text(
+                        text = "Boost your productivity with Pomodoro",
+                        fontSize = 13.sp,
+                        color = MutedText
+                    )
+                }
+            }
+
+            // Progress bar line
+            Spacer(modifier = Modifier.height(16.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(Color(0x20FFFFFF), CircleShape)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .background(AccentGreen, CircleShape)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // --- TIMER SECTION ---
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Circular progress ring
+                    Box(
+                        modifier = Modifier.size(160.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            drawArc(
+                                color = Color(0x10FFFFFF),
+                                startAngle = 0f,
+                                sweepAngle = 360f,
+                                useCenter = false,
+                                style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                            drawArc(
+                                color = AccentGreen,
+                                startAngle = -90f,
+                                sweepAngle = progress * 360f,
+                                useCenter = false,
+                                style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = dynamicLabel,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MutedText
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = timeStr,
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextWhite
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Controls row
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { viewModel.adjustPomodoroTime(-300) },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0x0DFFFFFF), CircleShape)
+                                .border(1.dp, CardBorder, CircleShape)
+                        ) {
+                            Text("- 5M", color = MutedText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        IconButton(
+                            onClick = {
+                                if (isRunning) viewModel.pausePomodoro() else viewModel.startPomodoro()
+                            },
+                            modifier = Modifier
+                                .size(56.dp)
+                                .background(if (isRunning) RedBg else AccentGreen.copy(alpha = 0.1f), CircleShape)
+                                .border(1.dp, if (isRunning) RedBorder else AccentGreen.copy(alpha = 0.3f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = if (isRunning) Icons.Outlined.PauseCircleFilled else Icons.Outlined.PlayCircleFilled,
+                                contentDescription = if (isRunning) "Pause timer" else "Start timer",
+                                tint = if (isRunning) LightRed else AccentGreen,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.resetPomodoro() },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(Color(0x1AFFFFFF), CircleShape)
+                                .border(1.dp, CardBorder, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Refresh,
+                                contentDescription = "Reset timer",
+                                tint = TextWhite,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.adjustPomodoroTime(300) },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0x0DFFFFFF), CircleShape)
+                                .border(1.dp, CardBorder, CircleShape)
+                        ) {
+                            Text("+ 5M", color = AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Select mode header
+                    Text(
+                        text = "POMODORO SETUP",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = HintText,
+                        letterSpacing = 1.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Mode select row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        PomodoroMode.values().forEach { mode ->
+                            val isSelected = pomodoroMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (isSelected) AccentGreen else Color(0x0DFFFFFF))
+                                    .border(1.dp, if (isSelected) Color.Transparent else CardBorder, RoundedCornerShape(20.dp))
+                                    .clickable { viewModel.setPomodoroMode(mode) }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = when (mode) {
+                                        PomodoroMode.WORK -> "25m"
+                                        PomodoroMode.BREAK_5 -> "5m"
+                                        PomodoroMode.BREAK_10 -> "10m"
+                                        PomodoroMode.BREAK_15 -> "15m"
+                                    },
+                                    color = if (isSelected) TextWhite else MutedText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // --- TASK TRACKER SECTION ---
+            Text(
+                text = "📋 TODO LIST",
+                color = MutedText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            // Add Task input box
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newTaskText,
+                        onValueChange = { newTaskText = it },
+                        placeholder = { Text("New task...", color = HintText) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp),
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedTextColor = TextWhite,
+                            unfocusedTextColor = TextWhite,
+                            unfocusedBorderColor = CardBorder,
+                            focusedBorderColor = AccentGreen,
+                            cursorColor = AccentGreen
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                if (newTaskText.isNotBlank()) {
+                                    viewModel.addTask(newTaskText)
+                                    newTaskText = ""
+                                }
+                                keyboardController?.hide()
+                            }
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (newTaskText.isNotBlank()) {
+                                viewModel.addTask(newTaskText)
+                                newTaskText = ""
+                            }
+                            keyboardController?.hide()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(50.dp)
+                    ) {
+                        Text("Add", color = TextWhite, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Tasks List
+            if (tasks.isEmpty()) {
+                Text(
+                    text = "No tasks yet. Stay focused!",
+                    color = HintText,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    textAlign = TextAlign.Center
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    tasks.forEach { task ->
+                        val cardBg = if (task.isCompleted) Color(0x08FFFFFF) else CardBg
+                        val borderCol = if (task.isCompleted) Color(0x08FFFFFF) else CardBorder
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = cardBg),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, borderCol)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    // Custom Circular Checkbox
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .border(
+                                                width = 2.dp,
+                                                color = if (task.isCompleted) AccentGreen else MutedText,
+                                                shape = CircleShape
+                                            )
+                                            .background(
+                                                color = if (task.isCompleted) AccentGreen else Color.Transparent,
+                                                shape = CircleShape
+                                            )
+                                            .clickable { viewModel.toggleTaskCompletion(task) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (task.isCompleted) {
+                                            Text(
+                                                text = "✓",
+                                                color = TextWhite,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Text(
+                                        text = task.text,
+                                        fontSize = 14.sp,
+                                        color = if (task.isCompleted) MutedText else TextWhite,
+                                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { viewModel.deleteTask(task) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Delete,
+                                        contentDescription = "Delete task",
+                                        tint = Color.Red.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }

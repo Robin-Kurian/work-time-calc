@@ -276,6 +276,20 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     val inTimeMs = currentSessions.first().inTime
                     val elapsedSeconds = (System.currentTimeMillis() - inTimeMs) / 1000
                     _liveActiveElapsedSeconds.value = Math.max(0L, elapsedSeconds)
+
+                    // Auto-trigger target reached alarm when reaching 7h 50m today while punched in
+                    val workedMinutesToday = calculateWorkedMinutes(currentSessions)
+                    if (workedMinutesToday >= TimeUtils.REQUIRED_MINUTES) {
+                        val todayStr = getTodayString()
+                        if (prefs.alarmedDay != todayStr) {
+                            prefs.alarmedDay = todayStr
+                            notificationHelper.sendNotification(
+                                "🎉 Target Reached! Time to leave!",
+                                "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
+                                isTimer = true
+                            )
+                        }
+                    }
                 } else {
                     _liveActiveElapsedSeconds.value = 0L
                 }
@@ -316,9 +330,14 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     )
 
                     if (workedMinutesToday >= TimeUtils.REQUIRED_MINUTES) {
+                        val alreadyAlarmed = prefs.alarmedDay == todayStr
+                        if (!alreadyAlarmed) {
+                            prefs.alarmedDay = todayStr
+                        }
                         notificationHelper.sendNotification(
                             "🎉 Time to leave!",
-                            "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today"
+                            "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
+                            isTimer = !alreadyAlarmed
                         )
                     }
                 }

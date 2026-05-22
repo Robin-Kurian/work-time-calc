@@ -14,6 +14,7 @@ class PreferencesHelper(context: Context) {
         private const val KEY_TRACKED_DAY = "s_day"
         private const val KEY_AUTO_TRACKING = "auto_tracking_enabled"
         private const val KEY_IS_LOCKED = "session_locked"
+        private const val KEY_ALARMED_DAY = "alarmed_day"
     }
 
     var arrivalTime: String
@@ -43,4 +44,8 @@ class PreferencesHelper(context: Context) {
     var isLocked: Boolean
         get() = prefs.getBoolean(KEY_IS_LOCKED, false)
         set(value) = prefs.edit().putBoolean(KEY_IS_LOCKED, value).apply()
+
+    var alarmedDay: String
+        get() = prefs.getString(KEY_ALARMED_DAY, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_ALARMED_DAY, value).apply()
 }

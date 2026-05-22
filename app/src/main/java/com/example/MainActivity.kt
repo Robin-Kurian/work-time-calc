@@ -44,6 +44,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Keyboard
@@ -60,6 +63,7 @@ import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.ui.platform.LocalConfiguration
 import android.content.res.Configuration
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import com.example.ui.viewmodel.PomodoroMode
 import androidx.compose.material3.Button
@@ -80,6 +84,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -146,7 +151,7 @@ enum class NavigationTab {
 
 @Composable
 fun MainContainer(viewModel: WorkViewModel) {
-    var selectedTab by remember { mutableStateOf(NavigationTab.AutoTracking) }
+    var selectedTab by rememberSaveable { mutableStateOf(NavigationTab.AutoTracking) }
     val context = LocalContext.current
 
     // Permissions check
@@ -676,7 +681,6 @@ fun SessionScreen(viewModel: WorkViewModel) {
     val isLocked by viewModel.isLocked.collectAsState()
 
     val context = LocalContext.current
-    val keyboardController = LocalSoftwareKeyboardController.current
 
     var showEditDialogForSession by remember { mutableStateOf<Session?>(null) }
 
@@ -685,18 +689,8 @@ fun SessionScreen(viewModel: WorkViewModel) {
     val remaining = Math.max(0, REQUIRED_MINUTES - workedMin)
     val isDone = workedMin >= REQUIRED_MINUTES
     val isIn = sessions.isNotEmpty() && sessions.first().outTime == null
+    val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
 
-    // Pulsing animation for dots
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
 
     Column(
         modifier = Modifier
@@ -754,273 +748,18 @@ fun SessionScreen(viewModel: WorkViewModel) {
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // --- WIFi STATUS PILL ---
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBg),
-            border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
-
-                Column(modifier = Modifier.weight(1f)) {
-                    val wifiText = if (!isAutoTrackingEnabled) {
-                        "Auto-tracking Disabled"
-                    } else if (isWorkWifiConnected) {
-                        "Connected - $currentSsidValue"
-                    } else if (currentSsidValue != null) {
-                        "Not connected ($currentSsidValue)"
-                    } else {
-                        "Not connected"
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Pulsing Dot aligned with first line text
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .alpha(if (isWorkWifiConnected && isAutoTrackingEnabled) pulseAlpha else 1.0f)
-                                .background(
-                                    color = if (!isAutoTrackingEnabled) Color.Gray else if (isWorkWifiConnected) AccentGreen else Color.Red,
-                                    shape = CircleShape
-                                )
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = wifiText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (!isAutoTrackingEnabled) MutedText else if (isWorkWifiConnected) AccentGreen else Color.Red
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Last checked: ${lastCheckedTime.ifEmpty { "Never" }}",
-                        fontSize = 10.sp,
-                        color = MutedText,
-                        modifier = Modifier.padding(start = 22.dp) // 10 dot + 12 spacer
-                    )
-                }
-
-                // Action Column (Refresh or Connect)
-                Column(horizontalAlignment = Alignment.End) {
-                    val canConnect = currentSsidValue != null && currentSsidValue != workSsid && !currentSsidValue.isNullOrEmpty()
-                    
-                    Box(
-                        modifier = Modifier
-                            .background(if (canConnect) AccentGreen.copy(alpha = 0.1f) else Color(0x1BFFFFFF), RoundedCornerShape(100.dp))
-                            .border(1.dp, if (canConnect) AccentGreen.copy(alpha = 0.3f) else Color.Transparent, RoundedCornerShape(100.dp))
-                            .clickable { if (canConnect) viewModel.setConnectedAsWork() else viewModel.checkWifiConnectionInstant() }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = if (canConnect) Icons.Outlined.Wifi else Icons.Outlined.Refresh,
-                                contentDescription = if (canConnect) "Connect current WiFi" else "Refresh WiFi status",
-                                tint = if (canConnect) AccentGreen else TextWhite,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (canConnect) "CONNECT" else "REFRESH",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (canConnect) AccentGreen else TextWhite
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // --- SSID SETTING Card ---
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBg),
-            border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "🔧 Work WiFi Name (SSID)",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextWhite
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                var localSsidInput by remember(workSsid) { mutableStateOf(workSsid) }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    OutlinedTextField(
-                        value = localSsidInput,
-                        onValueChange = { localSsidInput = it },
-                        placeholder = { Text("e.g. Office_WiFi", color = HintText) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp),
-                        colors = TextFieldDefaults.outlinedTextFieldColors(
-                            focusedTextColor = TextWhite,
-                            unfocusedTextColor = TextWhite,
-                            unfocusedBorderColor = CardBorder,
-                            focusedBorderColor = AccentGreen,
-                            cursorColor = AccentGreen
-                        ),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                viewModel.updateWorkSsid(localSsidInput)
-                                keyboardController?.hide()
-                            }
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            viewModel.updateWorkSsid(localSsidInput)
-                            keyboardController?.hide()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.height(50.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Save,
-                            contentDescription = "Save work SSID settings",
-                            tint = TextWhite
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "App auto-punches when it detects this WiFi name",
-                    fontSize = 11.sp,
-                    color = MutedText
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // --- MAIN PUNCH BUTTON & LOCK TOGGLE ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val punchButtonColor = if (isIn) RedBg else AccentGreen
-            val punchButtonBorderColor = if (isIn) RedBorder else Color.Transparent
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp) // Match height of lock button exactly
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(punchButtonColor)
-                    .border(2.dp, punchButtonBorderColor, RoundedCornerShape(20.dp))
-                    .clickable { viewModel.punch() }
-                    .testTag("punch_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(if (isIn) LightRed else TextWhite, CircleShape)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = if (isIn) "Punch Out" else "Punch In",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isIn) LightRed else TextWhite
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Lock Toggle
-            IconButton(
-                onClick = { viewModel.toggleLock() },
-                modifier = Modifier
-                    .size(56.dp)
-                    .background(if (isLocked) Color(0x33FBBF24) else Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
-                    .border(1.dp, if (isLocked) Color(0x66FBBF24) else Color(0x33FFFFFF), RoundedCornerShape(16.dp))
-            ) {
-                Icon(
-                    imageVector = if (isLocked) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
-                    contentDescription = "Toggle session lock",
-                    tint = if (isLocked) LightAmber else TextWhite,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // --- SUB PUNCH STATUS PILL ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(if (isIn) AccentGreen else Color.Gray, CircleShape)
+        if (!isWorkWifiConnected) {
+            Spacer(modifier = Modifier.height(16.dp))
+            WifiConnectionCard(
+                workSsid = workSsid,
+                currentSsidValue = currentSsidValue,
+                isAutoTrackingEnabled = isAutoTrackingEnabled,
+                lastCheckedTime = lastCheckedTime,
+                viewModel = viewModel
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            if (isIn) {
-                val startLocalTime = TimeUtils.fmtTimestamp(sessions.first().inTime)
-                val lockStatus = if (isLocked) " · 🔒 Locked" else ""
-                Text(
-                    text = "Clocked in since $startLocalTime · ⏱ ${TimeUtils.fmtElapsed(liveActiveSeconds)}$lockStatus",
-                    color = AccentGreen,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            } else {
-                if (sessions.isNotEmpty()) {
-                    val lastOutVal = sessions.first().outTime
-                    val lastOutStr = if (lastOutVal != null) TimeUtils.fmtTimestamp(lastOutVal) else ""
-                    Text(
-                        text = "Clocked out at $lastOutStr",
-                        color = MutedText,
-                        fontSize = 11.sp
-                    )
-                } else {
-                    Text(
-                        text = "Not clocked in",
-                        color = MutedText,
-                        fontSize = 11.sp
-                    )
-                }
-            }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // --- PROGRESS RING & SIDE STATS ---
         Card(
@@ -1144,6 +883,118 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     )
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- MAIN PUNCH BUTTON & LOCK TOGGLE ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val punchButtonColor = if (isIn) RedBg else AccentGreen
+            val punchButtonBorderColor = if (isIn) RedBorder else Color.Transparent
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp) // Match height of lock button exactly
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(punchButtonColor)
+                    .border(2.dp, punchButtonBorderColor, RoundedCornerShape(20.dp))
+                    .clickable { viewModel.punch() }
+                    .testTag("punch_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(if (isIn) LightRed else TextWhite, CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (isIn) "Punch Out" else "Punch In",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isIn) LightRed else TextWhite
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Lock Toggle
+            IconButton(
+                onClick = { viewModel.toggleLock() },
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(if (isLocked) Color(0x33FBBF24) else Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
+                    .border(1.dp, if (isLocked) Color(0x66FBBF24) else Color(0x33FFFFFF), RoundedCornerShape(16.dp))
+            ) {
+                Icon(
+                    imageVector = if (isLocked) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+                    contentDescription = "Toggle session lock",
+                    tint = if (isLocked) LightAmber else TextWhite,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // --- SUB PUNCH STATUS PILL ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(if (isIn) AccentGreen else Color.Gray, CircleShape)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            if (isIn) {
+                val startLocalTime = TimeUtils.fmtTimestamp(sessions.first().inTime)
+                val lockStatus = if (isLocked) " · 🔒 Locked" else ""
+                Text(
+                    text = "Clocked in since $startLocalTime · ⏱ ${TimeUtils.fmtElapsed(liveActiveSeconds)}$lockStatus",
+                    color = AccentGreen,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            } else {
+                if (sessions.isNotEmpty()) {
+                    val lastOutVal = sessions.first().outTime
+                    val lastOutStr = if (lastOutVal != null) TimeUtils.fmtTimestamp(lastOutVal) else ""
+                    Text(
+                        text = "Clocked out at $lastOutStr",
+                        color = MutedText,
+                        fontSize = 11.sp
+                    )
+                } else {
+                    Text(
+                        text = "Not clocked in",
+                        color = MutedText,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+
+        if (isWorkWifiConnected) {
+            Spacer(modifier = Modifier.height(16.dp))
+            WifiConnectionCard(
+                workSsid = workSsid,
+                currentSsidValue = currentSsidValue,
+                isAutoTrackingEnabled = isAutoTrackingEnabled,
+                lastCheckedTime = lastCheckedTime,
+                viewModel = viewModel
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -1400,6 +1251,227 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     showEditDialogForSession = null
                 }
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WifiConnectionCard(
+    workSsid: String,
+    currentSsidValue: String?,
+    isAutoTrackingEnabled: Boolean,
+    lastCheckedTime: String,
+    viewModel: WorkViewModel,
+    modifier: Modifier = Modifier
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var isEditingSsid by rememberSaveable { mutableStateOf(false) }
+    var localSsidInput by remember(workSsid) { mutableStateOf(workSsid) }
+
+    // Pulsing animation for dots
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse_wifi")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha_wifi"
+    )
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
+    ) {
+        if (isEditingSsid) {
+            // Editing view: Show a compact, clean, borderless text field with Save and Close buttons inline
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicTextField(
+                    value = localSsidInput,
+                    onValueChange = { localSsidInput = it },
+                    textStyle = TextStyle(
+                        color = TextWhite,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    cursorBrush = SolidColor(AccentGreen),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            viewModel.updateWorkSsid(localSsidInput)
+                            isEditingSsid = false
+                            keyboardController?.hide()
+                        }
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp),
+                    decorationBox = { innerTextField ->
+                        Box(
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (localSsidInput.isEmpty()) {
+                                Text(
+                                    text = "e.g. Office_WiFi",
+                                    color = HintText,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = {
+                        viewModel.updateWorkSsid(localSsidInput)
+                        isEditingSsid = false
+                        keyboardController?.hide()
+                    },
+                    modifier = Modifier
+                        .background(AccentGreen, RoundedCornerShape(8.dp))
+                        .size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Save,
+                        contentDescription = "Save work SSID settings",
+                        tint = TextWhite,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = {
+                        localSsidInput = workSsid
+                        isEditingSsid = false
+                        keyboardController?.hide()
+                    },
+                    modifier = Modifier
+                        .background(Color(0x0DFFFFFF), RoundedCornerShape(8.dp))
+                        .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
+                        .size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = "Cancel editing",
+                        tint = TextWhite.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        } else {
+            // Normal view: Minimal-height status line
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
+
+                Column(modifier = Modifier.weight(1f)) {
+                    val wifiText = if (!isAutoTrackingEnabled) {
+                        "Auto-tracking Disabled"
+                    } else if (isWorkWifiConnected) {
+                        "Connected - $currentSsidValue"
+                    } else if (currentSsidValue != null) {
+                        "Not connected ($currentSsidValue)"
+                    } else {
+                        "Not connected"
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Pulsing Dot aligned with first line text
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .alpha(if (isWorkWifiConnected && isAutoTrackingEnabled) pulseAlpha else 1.0f)
+                                .background(
+                                    color = if (!isAutoTrackingEnabled) Color.Gray else if (isWorkWifiConnected) AccentGreen else Color.Red,
+                                    shape = CircleShape
+                                )
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = wifiText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (!isAutoTrackingEnabled) MutedText else if (isWorkWifiConnected) AccentGreen else Color.Red
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Last checked: ${lastCheckedTime.ifEmpty { "Never" }}",
+                        fontSize = 10.sp,
+                        color = MutedText,
+                        modifier = Modifier.padding(start = 22.dp) // 10 dot + 12 spacer
+                    )
+                }
+
+                // Action Buttons Row: Edit (pencil) to the left of Refresh/Connect
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Pencil (Edit) Icon Button
+                    IconButton(
+                        onClick = { isEditingSsid = true },
+                        modifier = Modifier
+                            .background(Color(0x0DFFFFFF), CircleShape)
+                            .border(1.dp, CardBorder, CircleShape)
+                            .size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = "Edit target SSID",
+                            tint = AccentGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    // Refresh / Connect Button
+                    val canConnect = currentSsidValue != null && currentSsidValue != workSsid && !currentSsidValue.isNullOrEmpty()
+                    Box(
+                        modifier = Modifier
+                            .background(if (canConnect) AccentGreen.copy(alpha = 0.1f) else Color(0x1BFFFFFF), RoundedCornerShape(100.dp))
+                            .border(1.dp, if (canConnect) AccentGreen.copy(alpha = 0.3f) else Color.Transparent, RoundedCornerShape(100.dp))
+                            .clickable { if (canConnect) viewModel.setConnectedAsWork() else viewModel.checkWifiConnectionInstant() }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = if (canConnect) Icons.Outlined.Wifi else Icons.Outlined.Refresh,
+                                contentDescription = if (canConnect) "Connect current WiFi" else "Refresh WiFi status",
+                                tint = if (canConnect) AccentGreen else TextWhite,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (canConnect) "CONNECT" else "REFRESH",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (canConnect) AccentGreen else TextWhite
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1952,7 +2024,7 @@ fun FocusScreen(viewModel: WorkViewModel) {
         }
     } else {
         // Portrait Mode: Pomodoro Setup + Task Tracker
-        var newTaskText by remember { mutableStateOf("") }
+        var newTaskText by rememberSaveable { mutableStateOf("") }
 
         Column(
             modifier = Modifier

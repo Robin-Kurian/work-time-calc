@@ -429,7 +429,8 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                         val modeName = _pomodoroMode.value.displayName
                         notificationHelper.sendNotification(
                             "⏱ Pomodoro Timer Finished",
-                            "Your $modeName session is complete."
+                            "Your $modeName session is complete.",
+                            isTimer = true
                         )
                         break
                     }

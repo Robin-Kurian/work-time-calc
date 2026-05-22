@@ -4,12 +4,27 @@ gen/
 out/
 build/
 app/build/
+release/
+app/release/
+
+# Built/packaged/signing files
+*.apk
+*.aar
+*.ap_
+*.aab
+*.dex
+*.class
+
+# Key / Keystore files
+*.jks
+*.keystore
 
 # Gradle files
 .gradle/
 
-# Local configuration file (sdk path, etc.)
+# Local configuration files (sdk path, etc.)
 local.properties
+secrets.properties
 
 # Log files
 *.log
@@ -19,7 +34,12 @@ local.properties
 *.iml
 *.ipr
 *.iws
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
 
-# OS files
+# OS/System files
 .DS_Store
 Thumbs.db
+

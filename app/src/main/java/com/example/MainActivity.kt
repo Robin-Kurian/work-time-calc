@@ -3,7 +3,6 @@ package com.example
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
-import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
 import android.content.pm.PackageManager
@@ -14,18 +13,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,14 +45,17 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.PauseCircleFilled
 import androidx.compose.material.icons.outlined.PlayCircleFilled
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -148,7 +145,7 @@ fun MainContainer(viewModel: WorkViewModel) {
     // Permissions check
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
+    ) { _ ->
         viewModel.checkWifiConnectionInstant()
     }
 
@@ -298,7 +295,7 @@ fun ManualScreen(viewModel: WorkViewModel) {
         ) {
             Column {
                 Text(
-                    text = "Manual Tracking",
+                    text = "W.T Calc (Manual)",
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextWhite,
@@ -367,7 +364,7 @@ fun ManualScreen(viewModel: WorkViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedKey(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Card(
                 modifier = Modifier
@@ -504,7 +501,17 @@ fun ManualScreen(viewModel: WorkViewModel) {
                         .background(Color(0x60000000)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🍔", fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("🍔", fontSize = 14.sp)
+                        if (calcState.lunchDur > 25) {
+                            Text(
+                                text = TimeUtils.fmtDur(calcState.lunchDur),
+                                fontSize = 9.sp,
+                                color = TextWhite,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
 
                 // PM Work
@@ -616,29 +623,6 @@ fun ManualScreen(viewModel: WorkViewModel) {
     }
 }
 
-// Reusable arrangement helper
-fun Arrangement.spacedKey(space: androidx.compose.ui.unit.Dp): Arrangement.HorizontalOrVertical {
-    return Arrangement.spacedBy(space)
-}
-
-// Reusable Native TimePicker helper
-fun showTimePicker(context: Context, currentTime: String, onTimeSelected: (String) -> Unit) {
-    val currentParts = currentTime.split(":")
-    val calendar = Calendar.getInstance()
-    val hour = currentParts.getOrNull(0)?.toIntOrNull() ?: calendar.get(Calendar.HOUR_OF_DAY)
-    val minute = currentParts.getOrNull(1)?.toIntOrNull() ?: calendar.get(Calendar.MINUTE)
-
-    TimePickerDialog(
-        context,
-        { _, selectedHour, selectedMinute ->
-            onTimeSelected(String.format(Locale.US, "%02d:%02d", selectedHour, selectedMinute))
-        },
-        hour,
-        minute,
-        true
-    ).show()
-}
-
 
 // ---------------- SESSION SCREEN (Auto Tracking) ----------------
 @OptIn(ExperimentalMaterial3Api::class)
@@ -646,13 +630,16 @@ fun showTimePicker(context: Context, currentTime: String, onTimeSelected: (Strin
 fun SessionScreen(viewModel: WorkViewModel) {
     val sessions by viewModel.sessions.collectAsState()
     val workSsid by viewModel.workSsid.collectAsState()
-    val currentSsid by viewModel.currentSsid.collectAsState()
+    val currentSsidValue by viewModel.currentSsid.collectAsState()
     val lastCheckedTime by viewModel.lastCheckedTime.collectAsState()
     val liveActiveSeconds by viewModel.liveActiveElapsedSeconds.collectAsState()
     val isAutoTrackingEnabled by viewModel.isAutoTrackingEnabled.collectAsState()
+    val isLocked by viewModel.isLocked.collectAsState()
 
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    var showEditDialogForSession by remember { mutableStateOf<Session?>(null) }
 
     val workedMin = viewModel.calculateWorkedMinutes(sessions)
     val pct = Math.min(100, Math.round((workedMin.toFloat() / REQUIRED_MINUTES) * 100))
@@ -687,7 +674,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
         ) {
             Column {
                 Text(
-                    text = "Auto Tracking",
+                    text = "W.T Tracker (Auto)",
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextWhite,
@@ -744,55 +731,56 @@ fun SessionScreen(viewModel: WorkViewModel) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val isWorkWifiConnected = currentSsid != null && currentSsid == workSsid && workSsid.isNotEmpty()
+                val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    // Pulsing Dot
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .alpha(if (isWorkWifiConnected && isAutoTrackingEnabled) pulseAlpha else 1.0f)
-                            .background(
-                                color = if (!isAutoTrackingEnabled) Color.Gray else if (isWorkWifiConnected) AccentGreen else Color.Red,
-                                shape = CircleShape
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        val wifiText = if (!isAutoTrackingEnabled) {
-                            "Auto-tracking Disabled"
-                        } else if (isWorkWifiConnected) {
-                            "Connected - $currentSsid"
-                        } else if (currentSsid != null) {
-                            "Not connected ($currentSsid)"
-                        } else {
-                            "Not connected"
-                        }
+                Column(modifier = Modifier.weight(1f)) {
+                    val wifiText = if (!isAutoTrackingEnabled) {
+                        "Auto-tracking Disabled"
+                    } else if (isWorkWifiConnected) {
+                        "Connected - $currentSsidValue"
+                    } else if (currentSsidValue != null) {
+                        "Not connected ($currentSsidValue)"
+                    } else {
+                        "Not connected"
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Pulsing Dot aligned with first line text
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .alpha(if (isWorkWifiConnected && isAutoTrackingEnabled) pulseAlpha else 1.0f)
+                                .background(
+                                    color = if (!isAutoTrackingEnabled) Color.Gray else if (isWorkWifiConnected) AccentGreen else Color.Red,
+                                    shape = CircleShape
+                                )
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = wifiText,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (!isAutoTrackingEnabled) MutedText else if (isWorkWifiConnected) AccentGreen else Color.Red
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Last checked: ${lastCheckedTime.ifEmpty { "Never" }}",
-                            fontSize = 10.sp,
-                            color = MutedText
-                        )
                     }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Last checked: ${lastCheckedTime.ifEmpty { "Never" }}",
+                        fontSize = 10.sp,
+                        color = MutedText,
+                        modifier = Modifier.padding(start = 22.dp) // 10 dot + 12 spacer
+                    )
                 }
 
-                // Action Column (Refresh & Set as Work)
+                // Action Column (Refresh or Connect)
                 Column(horizontalAlignment = Alignment.End) {
-                    // Refresh small button
+                    val canConnect = currentSsidValue != null && currentSsidValue != workSsid && !currentSsidValue.isNullOrEmpty()
+                    
                     Box(
                         modifier = Modifier
-                            .background(Color(0x1BFFFFFF), RoundedCornerShape(100.dp))
-                            .clickable { viewModel.checkWifiConnectionInstant() }
+                            .background(if (canConnect) AccentGreen.copy(alpha = 0.1f) else Color(0x1BFFFFFF), RoundedCornerShape(100.dp))
+                            .border(1.dp, if (canConnect) AccentGreen.copy(alpha = 0.3f) else Color.Transparent, RoundedCornerShape(100.dp))
+                            .clickable { if (canConnect) viewModel.setConnectedAsWork() else viewModel.checkWifiConnectionInstant() }
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Row(
@@ -800,30 +788,19 @@ fun SessionScreen(viewModel: WorkViewModel) {
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Refresh,
-                                contentDescription = "Refresh WiFi status",
-                                tint = TextWhite,
+                                imageVector = if (canConnect) Icons.Outlined.Wifi else Icons.Outlined.Refresh,
+                                contentDescription = if (canConnect) "Connect current WiFi" else "Refresh WiFi status",
+                                tint = if (canConnect) AccentGreen else TextWhite,
                                 modifier = Modifier.size(12.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "REFRESH",
+                                text = if (canConnect) "CONNECT" else "REFRESH",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = TextWhite
+                                color = if (canConnect) AccentGreen else TextWhite
                             )
                         }
-                    }
-                    
-                    if (currentSsid != null && currentSsid != workSsid) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Use current WiFi",
-                            color = AccentGreen,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { viewModel.setConnectedAsWork() }
-                        )
                     }
                 }
             }
@@ -905,37 +882,59 @@ fun SessionScreen(viewModel: WorkViewModel) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // --- MAIN PUNCH BUTTON ---
-        val punchButtonColor = if (isIn) RedBg else AccentGreen
-        val punchButtonBorderColor = if (isIn) RedBorder else Color.Transparent
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .scale(0.98f)
-                .height(72.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(punchButtonColor)
-                .border(2.dp, punchButtonBorderColor, RoundedCornerShape(20.dp))
-                .clickable { viewModel.punch() }
-                .testTag("punch_button"),
-            contentAlignment = Alignment.Center
+        // --- MAIN PUNCH BUTTON & LOCK TOGGLE ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+            val punchButtonColor = if (isIn) RedBg else AccentGreen
+            val punchButtonBorderColor = if (isIn) RedBorder else Color.Transparent
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp) // Match height of lock button exactly
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(punchButtonColor)
+                    .border(2.dp, punchButtonBorderColor, RoundedCornerShape(20.dp))
+                    .clickable { viewModel.punch() }
+                    .testTag("punch_button"),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(if (isIn) LightRed else TextWhite, CircleShape)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = if (isIn) "🔴 Punch Out" else "🟢 Punch In",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isIn) LightRed else TextWhite
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(if (isIn) LightRed else TextWhite, CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (isIn) "Punch Out" else "Punch In",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isIn) LightRed else TextWhite
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Lock Toggle
+            IconButton(
+                onClick = { viewModel.toggleLock() },
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(if (isLocked) Color(0x33FBBF24) else Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
+                    .border(1.dp, if (isLocked) Color(0x66FBBF24) else Color(0x33FFFFFF), RoundedCornerShape(16.dp))
+            ) {
+                Icon(
+                    imageVector = if (isLocked) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+                    contentDescription = "Toggle session lock",
+                    tint = if (isLocked) LightAmber else TextWhite,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
@@ -956,8 +955,9 @@ fun SessionScreen(viewModel: WorkViewModel) {
             Spacer(modifier = Modifier.width(6.dp))
             if (isIn) {
                 val startLocalTime = TimeUtils.fmtTimestamp(sessions.first().inTime)
+                val lockStatus = if (isLocked) " · 🔒 Locked" else ""
                 Text(
-                    text = "Clocked in since $startLocalTime · ⏱ ${TimeUtils.fmtElapsed(liveActiveSeconds)}",
+                    text = "Clocked in since $startLocalTime · ⏱ ${TimeUtils.fmtElapsed(liveActiveSeconds)}$lockStatus",
                     color = AccentGreen,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -1056,12 +1056,24 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     )
 
                     // Projected leave time calculation
-                    val nowMin = TimeUtils.nowMinutes()
-                    val leaveMin = Math.floor(nowMin.toDouble() + Math.ceil(remaining.toDouble())).toInt()
-                    val nextDay = leaveMin >= 1440
-                    val leaveStr = TimeUtils.toTime(leaveMin) + (if (nextDay) " (Tomorrow)" else "")
+                    val completedMs = if (isIn) {
+                        sessions.drop(1).sumOf { it.outTime?.let { out -> out - it.inTime } ?: 0L }
+                    } else {
+                        sessions.sumOf { it.outTime?.let { out -> out - it.inTime } ?: 0L }
+                    }
+                    val targetOutTimeMs = if (isIn) {
+                        sessions.first().inTime + (REQUIRED_MINUTES * 60 * 1000 - completedMs)
+                    } else {
+                        System.currentTimeMillis() + (REQUIRED_MINUTES * 60 * 1000 - completedMs)
+                    }
+                    val calTarget = Calendar.getInstance().apply { timeInMillis = targetOutTimeMs }
+                    val calToday = Calendar.getInstance()
+                    val isTomorrow = calTarget.get(Calendar.DAY_OF_YEAR) != calToday.get(Calendar.DAY_OF_YEAR) ||
+                                     calTarget.get(Calendar.YEAR) != calToday.get(Calendar.YEAR)
+                    val leaveStr = TimeUtils.fmtTimestamp(targetOutTimeMs) + (if (isTomorrow) " (Tomorrow)" else "")
+                    val leaveLabel = if (isDone) "Target reached at" else "Leave by"
                     Text(
-                        text = "Leave by ~$leaveStr",
+                        text = "$leaveLabel ~$leaveStr",
                         color = LightRed,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -1201,6 +1213,17 @@ fun SessionScreen(viewModel: WorkViewModel) {
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     IconButton(onClick = {
+                                        showEditDialogForSession = session
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Edit,
+                                            contentDescription = "Edit session",
+                                            tint = AccentGreen.copy(alpha = 0.8f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    IconButton(onClick = {
                                         showDeleteConfirmation(context) {
                                             viewModel.deleteSession(session)
                                         }
@@ -1264,7 +1287,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                             if (index < sessions.size - 1) {
                                 val nextSession = sessions[index + 1]
                                 if (nextSession.outTime != null) {
-                                    val outsideMin = ((session.inTime - nextSession.outTime!!) / 60000).toInt()
+                                    val outsideMin = ((session.inTime - nextSession.outTime) / 60000).toInt()
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Box(
                                         modifier = Modifier
@@ -1302,10 +1325,39 @@ fun SessionScreen(viewModel: WorkViewModel) {
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center
         )
+
+        showEditDialogForSession?.let { session ->
+            EditSessionDialog(
+                session = session,
+                onDismiss = { showEditDialogForSession = null },
+                onSave = { updatedSession ->
+                    viewModel.updateSession(updatedSession)
+                    showEditDialogForSession = null
+                }
+            )
+        }
     }
 }
 
-// Dialog helper for clearance confirmation to avoid crash
+// Dialog helper for individual time selection
+fun showTimePicker(context: Context, currentTime: String, onTimeSelected: (String) -> Unit) {
+    val currentParts = currentTime.split(":")
+    val calendar = Calendar.getInstance()
+    val hour = currentParts.getOrNull(0)?.toIntOrNull() ?: calendar.get(Calendar.HOUR_OF_DAY)
+    val minute = currentParts.getOrNull(1)?.toIntOrNull() ?: calendar.get(Calendar.MINUTE)
+
+    TimePickerDialog(
+        context,
+        { _, selectedHour, selectedMinute ->
+            onTimeSelected(String.format(Locale.US, "%02d:%02d", selectedHour, selectedMinute))
+        },
+        hour,
+        minute,
+        true
+    ).show()
+}
+
+// Dialog helper for clearance confirmation
 fun showClearConfirmation(context: Context, onConfirmed: () -> Unit) {
     AlertDialog.Builder(context)
         .setTitle("Clear Daily Data?")
@@ -1333,4 +1385,269 @@ fun showDeleteConfirmation(context: Context, onConfirmed: () -> Unit) {
             dialog.dismiss()
         }
         .show()
+}
+
+fun showTimePickerForTimestamp(
+    context: Context,
+    timestamp: Long?,
+    baseDateTimestamp: Long,
+    onTimeSelected: (Long) -> Unit
+) {
+    val calendar = Calendar.getInstance().apply {
+        timeInMillis = timestamp ?: System.currentTimeMillis()
+    }
+    val hour = calendar.get(Calendar.HOUR_OF_DAY)
+    val minute = calendar.get(Calendar.MINUTE)
+
+    TimePickerDialog(
+        context,
+        { _, selectedHour, selectedMinute ->
+            val base = timestamp ?: baseDateTimestamp
+            val updated = TimeUtils.updateTimeOfTimestamp(base, selectedHour, selectedMinute)
+            onTimeSelected(updated)
+        },
+        hour,
+        minute,
+        true
+    ).show()
+}
+
+@Composable
+fun EditSessionDialog(
+    session: Session,
+    onDismiss: () -> Unit,
+    onSave: (Session) -> Unit
+) {
+    val context = LocalContext.current
+    var tempInTime by remember { mutableStateOf(session.inTime) }
+    var tempOutTime by remember { mutableStateOf(session.outTime) }
+
+    val hasError = tempOutTime != null && tempOutTime!! < tempInTime
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111815)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth()
+            ) {
+                Text(
+                    text = "Edit Session",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextWhite
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- IN TIME SECTION ---
+                Text(
+                    text = "IN TIME",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MutedText,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0x0DFFFFFF), RoundedCornerShape(12.dp))
+                        .border(1.dp, CardBorder, RoundedCornerShape(12.dp))
+                        .clickable {
+                            showTimePickerForTimestamp(context, tempInTime, session.inTime) { updated ->
+                                tempInTime = updated
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = TimeUtils.fmtTimestamp(tempInTime),
+                            fontSize = 16.sp,
+                            color = TextWhite,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = "Edit In Time",
+                            tint = AccentGreen,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- OUT TIME SECTION ---
+                Text(
+                    text = "OUT TIME",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MutedText,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (tempOutTime == null) {
+                        // Ongoing indicator
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(AccentGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                                .border(1.dp, AccentGreen.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Text(
+                                text = "Ongoing",
+                                fontSize = 14.sp,
+                                color = AccentGreen,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                        }
+
+                        // Button to Set Out Time
+                        Button(
+                            onClick = {
+                                showTimePickerForTimestamp(context, null, tempInTime) { updated ->
+                                    tempOutTime = updated
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text("Set Out", fontSize = 12.sp, color = TextWhite)
+                        }
+                    } else {
+                        // Clickable Out Time Box
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(Color(0x0DFFFFFF), RoundedCornerShape(12.dp))
+                                .border(1.dp, CardBorder, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    showTimePickerForTimestamp(context, tempOutTime, tempInTime) { updated ->
+                                        tempOutTime = updated
+                                    }
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = TimeUtils.fmtTimestamp(tempOutTime!!),
+                                    fontSize = 16.sp,
+                                    color = TextWhite,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = "Edit Out Time",
+                                    tint = AccentGreen,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // Button to clear Out Time back to null (ongoing)
+                        Button(
+                            onClick = { tempOutTime = null },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, LightRed.copy(alpha = 0.5f)),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text("Ongoing", fontSize = 12.sp, color = LightRed)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- LIVE DURATION / ERROR INFO ---
+                val durationMin = if (tempOutTime == null) {
+                    ((System.currentTimeMillis() - tempInTime) / 60000).toInt()
+                } else {
+                    ((tempOutTime!! - tempInTime) / 60000).toInt()
+                }
+
+                if (hasError) {
+                    Text(
+                        text = "⚠️ Out time cannot be before In time",
+                        color = LightRed,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                } else {
+                    val durationText = if (tempOutTime == null) {
+                        "Duration: Ongoing (${TimeUtils.fmtDur(durationMin)})"
+                    } else {
+                        "Duration: ${TimeUtils.fmtDur(durationMin)}"
+                    }
+                    Text(
+                        text = durationText,
+                        color = if (tempOutTime == null) AccentGreen else TextWhite.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // --- ACTION BUTTONS ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text(text = "Cancel", color = MutedText)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (!hasError) {
+                                onSave(session.copy(inTime = tempInTime, outTime = tempOutTime))
+                            }
+                        },
+                        enabled = !hasError,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGreen,
+                            disabledContainerColor = AccentGreen.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(text = "Save", color = if (hasError) TextWhite.copy(alpha = 0.5f) else TextWhite)
+                    }
+                }
+            }
+        }
+    }
 }

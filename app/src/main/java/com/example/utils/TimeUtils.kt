@@ -79,4 +79,16 @@ object TimeUtils {
             String.format(Locale.US, "%d:%02d", mm, ss)
         }
     }
+
+    // Update the hour and minute of a given timestamp, keeping the date the same
+    fun updateTimeOfTimestamp(originalTimestamp: Long, selectedHour: Int, selectedMinute: Int): Long {
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = originalTimestamp
+        calendar.set(Calendar.HOUR_OF_DAY, selectedHour)
+        calendar.set(Calendar.MINUTE, selectedMinute)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        return calendar.timeInMillis
+    }
 }
+

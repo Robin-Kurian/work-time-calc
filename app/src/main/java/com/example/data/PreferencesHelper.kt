@@ -13,6 +13,7 @@ class PreferencesHelper(context: Context) {
         private const val KEY_WORK_SSID = "work_ssid"
         private const val KEY_TRACKED_DAY = "s_day"
         private const val KEY_AUTO_TRACKING = "auto_tracking_enabled"
+        private const val KEY_IS_LOCKED = "session_locked"
     }
 
     var arrivalTime: String
@@ -38,4 +39,8 @@ class PreferencesHelper(context: Context) {
     var isAutoTrackingEnabled: Boolean
         get() = prefs.getBoolean(KEY_AUTO_TRACKING, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_TRACKING, value).apply()
+
+    var isLocked: Boolean
+        get() = prefs.getBoolean(KEY_IS_LOCKED, false)
+        set(value) = prefs.edit().putBoolean(KEY_IS_LOCKED, value).apply()
 }

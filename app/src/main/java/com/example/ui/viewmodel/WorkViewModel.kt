@@ -3,7 +3,9 @@ package com.example.ui.viewmodel
 import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
@@ -49,6 +51,9 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     private val _isAutoTrackingEnabled = MutableStateFlow(prefs.isAutoTrackingEnabled)
     val isAutoTrackingEnabled = _isAutoTrackingEnabled.asStateFlow()
 
+    private val _isLocked = MutableStateFlow(prefs.isLocked)
+    val isLocked = _isLocked.asStateFlow()
+
     // Real-time ticking relative elapsed timer since last Punch In
     private val _liveActiveElapsedSeconds = MutableStateFlow(0L)
     val liveActiveElapsedSeconds = _liveActiveElapsedSeconds.asStateFlow()
@@ -56,6 +61,24 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     // Auto-refresh control jobs
     private var timerJob: Job? = null
     private var wifiPollJob: Job? = null
+    private var sessionLoadJob: Job? = null
+    private var isPunching = false
+
+    private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            checkWifiConnectionInstant()
+        }
+
+        override fun onLost(network: Network) {
+            checkWifiConnectionInstant()
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            checkWifiConnectionInstant()
+        }
+    }
 
     // Get today's unique date string
     fun getTodayString(): String {
@@ -70,6 +93,15 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         checkMidnightAndLoadSessions()
         startWifiPolling()
         startLiveTimer()
+        
+        val networkRequest = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        try {
+            connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     // Manual calculation helper properties as combiners
@@ -125,6 +157,13 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         prefs.isAutoTrackingEnabled = newState
     }
 
+    fun toggleLock() {
+        val newState = !_isLocked.value
+        _isLocked.value = newState
+        prefs.isLocked = newState
+        checkWifiConnectionInstant()
+    }
+
     fun setConnectedAsWork() {
         val current = _currentSsid.value
         if (!current.isNullOrEmpty()) {
@@ -134,7 +173,8 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
 
     // Active tracking
     fun checkMidnightAndLoadSessions() {
-        viewModelScope.launch {
+        sessionLoadJob?.cancel()
+        sessionLoadJob = viewModelScope.launch {
             val todayStr = getTodayString()
             val savedDay = prefs.trackedDay
             if (savedDay != todayStr) {
@@ -155,36 +195,29 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
             val context = getApplication<Application>()
             val ssid = getActiveWifiSsid(context)
             val isCurrentlyOnWifi = isActuallyOnWifi(context)
-
+            
             val currentS = _sessions.value
             val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
             val targetSsid = workSsid.value
 
-            // UI Label Fix: If system hides SSID name in background but we are still on WiFi
-            // and currently Punched In, we "assume" it's still the work WiFi for the UI display.
+            // UI Label Fix
             if (ssid == null && isCurrentlyOnWifi && isIn) {
                 _currentSsid.value = targetSsid
             } else {
                 _currentSsid.value = ssid
             }
-
+            
             _lastCheckedTime.value = SimpleDateFormat("h:mm a", Locale.US).format(Date())
 
-            // Auto punch tracking if auto-tracking is enabled
-            if (_isAutoTrackingEnabled.value) {
+            // Auto punch tracking: Skip if LOCKED or DISABLED
+            if (_isAutoTrackingEnabled.value && !_isLocked.value) {
                 if (targetSsid.isNotEmpty()) {
                     if (ssid == targetSsid && !isIn) {
-                        // 1. Auto punch IN (Certain match)
                         punch()
                     } else if (isIn) {
-                        // We are clocked in. Should we clock out?
-                        // ONLY clock out if:
-                        // A) We see a DIFFERENT identifiable WiFi (not null, not target)
-                        // B) We are definitely NOT on WiFi anymore (no transport)
-
                         val isDifferentIdentifiableWifi = !ssid.isNullOrEmpty() && ssid != targetSsid && ssid != "<unknown ssid>"
                         val hasLeftWifiEntirely = !isCurrentlyOnWifi
-
+                        
                         if (isDifferentIdentifiableWifi || hasLeftWifiEntirely) {
                             punch()
                         }
@@ -199,7 +232,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         wifiPollJob = viewModelScope.launch {
             while (true) {
                 checkWifiConnectionInstant()
-                delay(30000) // Poll every 30 seconds
+                delay(60000) // Fallback poll every 60 seconds
             }
         }
     }
@@ -207,7 +240,14 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     private fun startLiveTimer() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
+            var lastCheckedDay = getTodayString()
             while (true) {
+                val today = getTodayString()
+                if (today != lastCheckedDay) {
+                    lastCheckedDay = today
+                    checkMidnightAndLoadSessions()
+                }
+                
                 val currentSessions = _sessions.value
                 if (currentSessions.isNotEmpty() && currentSessions.first().outTime == null) {
                     val inTimeMs = currentSessions.first().inTime
@@ -222,52 +262,66 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun punch() {
+        if (isPunching) return
+        isPunching = true
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            val todayStr = getTodayString()
-            val currentSessions = _sessions.value
-            val hasActive = currentSessions.isNotEmpty() && currentSessions.first().outTime == null
+            try {
+                val now = System.currentTimeMillis()
+                val todayStr = getTodayString()
+                val currentSessions = _sessions.value
+                val hasActive = currentSessions.isNotEmpty() && currentSessions.first().outTime == null
 
-            if (!hasActive) {
-                // Punch IN
-                val newSession = Session(inTime = now, outTime = null, dayString = todayStr)
-                sessionDao.insertSession(newSession)
-                notificationHelper.sendNotification("🟢 Punched In", "Started at ${TimeUtils.fmtTimestamp(now)}")
-            } else {
-                // Punch OUT
-                val activeSession = currentSessions.first()
-                val updated = activeSession.copy(outTime = now)
-                sessionDao.updateSession(updated)
+                if (!hasActive) {
+                    // Punch IN
+                    val newSession = Session(inTime = now, outTime = null, dayString = todayStr)
+                    sessionDao.insertSession(newSession)
+                    notificationHelper.sendNotification("🟢 Punched In", "Started at ${TimeUtils.fmtTimestamp(now)}")
+                } else {
+                    // Punch OUT
+                    val activeSession = currentSessions.first()
+                    val updated = activeSession.copy(outTime = now)
+                    sessionDao.updateSession(updated)
 
-                val sessionDurMin = ((now - activeSession.inTime) / 60000).toInt()
-                val workedMinutesToday = calculateWorkedMinutes(currentSessions.map {
-                    if (it.id == activeSession.id) updated else it
-                })
+                    val sessionDurMin = ((now - activeSession.inTime) / 60000).toInt()
+                    val workedMinutesToday = calculateWorkedMinutes(currentSessions.map {
+                        if (it.id == activeSession.id) updated else it
+                    })
 
-                notificationHelper.sendNotification(
-                    "🔴 Punched Out",
-                    "Session: ${TimeUtils.fmtDur(sessionDurMin)} · Total: ${TimeUtils.fmtDur(workedMinutesToday)}"
-                )
-
-                if (workedMinutesToday >= TimeUtils.REQUIRED_MINUTES) {
                     notificationHelper.sendNotification(
-                        "🎉 Time to leave!",
-                        "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today"
+                        "🔴 Punched Out",
+                        "Session: ${TimeUtils.fmtDur(sessionDurMin)} · Total: ${TimeUtils.fmtDur(workedMinutesToday)}"
                     )
+
+                    if (workedMinutesToday >= TimeUtils.REQUIRED_MINUTES) {
+                        notificationHelper.sendNotification(
+                            "🎉 Time to leave!",
+                            "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today"
+                        )
+                    }
                 }
+                // Reload
+                checkMidnightAndLoadSessions()
+            } finally {
+                delay(500)
+                isPunching = false
             }
-            // Reload just in case
-            checkMidnightAndLoadSessions()
         }
     }
 
     fun deleteSession(session: Session) {
         viewModelScope.launch {
             sessionDao.deleteSession(session)
-            // Reload just in case
             checkMidnightAndLoadSessions()
         }
     }
+
+    fun updateSession(session: Session) {
+        viewModelScope.launch {
+            sessionDao.updateSession(session)
+            checkMidnightAndLoadSessions()
+        }
+    }
+
 
     fun clearAllSessions() {
         viewModelScope.launch {
@@ -290,6 +344,12 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         timerJob?.cancel()
         wifiPollJob?.cancel()
+        sessionLoadJob?.cancel()
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun isActuallyOnWifi(context: Context): Boolean {
@@ -308,7 +368,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
             val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val network = connectivityManager.activeNetwork ?: return null
             val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
-
+            
             if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
                 val wifiInfo = capabilities.transportInfo as? WifiInfo
                 var ssid = wifiInfo?.ssid

@@ -1283,24 +1283,50 @@ fun SessionScreen(viewModel: WorkViewModel) {
                                 }
                             }
 
-                            // If not the first entry, show "Outside" time pill
-                            if (index < sessions.size - 1) {
-                                val nextSession = sessions[index + 1]
-                                if (nextSession.outTime != null) {
-                                    val outsideMin = ((session.inTime - nextSession.outTime) / 60000).toInt()
-                                    Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+
+                    if (index < sessions.size - 1) {
+                        val nextSession = sessions[index + 1]
+                        if (nextSession.outTime != null) {
+                            val outsideMin = ((session.inTime - nextSession.outTime) / 60000).toInt()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
                                     Box(
                                         modifier = Modifier
-                                            .background(Color(0x0DFFFFFF), RoundedCornerShape(8.dp))
-                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                            .weight(1f)
+                                            .height(1.dp)
+                                            .background(Color(0x14FFFFFF))
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color(0x0DFFFFFF), RoundedCornerShape(12.dp))
+                                            .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(12.dp))
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Text(
                                             text = "☕ Outside for ${TimeUtils.fmtDur(outsideMin)}",
-                                            fontSize = 10.sp,
+                                            fontSize = 11.sp,
                                             color = MutedText,
-                                            fontStyle = FontStyle.Italic
+                                            fontWeight = FontWeight.Medium
                                         )
                                     }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(1.dp)
+                                            .background(Color(0x14FFFFFF))
+                                    )
                                 }
                             }
                         }

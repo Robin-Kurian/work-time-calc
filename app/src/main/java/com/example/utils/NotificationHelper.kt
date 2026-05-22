@@ -96,6 +96,31 @@ class NotificationHelper(private val context: Context) {
                 builder.setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
                 builder.setCategory(NotificationCompat.CATEGORY_ALARM)
 
+                // Play system alarm ringtone programmatically for 4 seconds as a bulletproof foreground fallback
+                try {
+                    val ringtone = RingtoneManager.getRingtone(context, alarmUri)
+                    if (ringtone != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            ringtone.audioAttributes = android.media.AudioAttributes.Builder()
+                                .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build()
+                        }
+                        ringtone.play()
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            try {
+                                if (ringtone.isPlaying) {
+                                    ringtone.stop()
+                                }
+                            } catch (ex: Exception) {
+                                ex.printStackTrace()
+                            }
+                        }, 4000)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
                 // Vibrate device directly for 1 second as robust foreground feedback
                 val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager

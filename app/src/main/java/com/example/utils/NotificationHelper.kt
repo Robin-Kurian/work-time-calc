@@ -66,6 +66,71 @@ class NotificationHelper(private val context: Context) {
         }
     }
 
+    private var activeRingtone: android.media.Ringtone? = null
+    private var activeVibrator: Vibrator? = null
+
+    fun playAlarmSoundAndVibration() {
+        stopAlarmSoundAndVibration() // Ensure any prior alarm is stopped
+        try {
+            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val ringtone = RingtoneManager.getRingtone(context, alarmUri)
+            if (ringtone != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    ringtone.audioAttributes = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    ringtone.isLooping = true
+                }
+                ringtone.play()
+                activeRingtone = ringtone
+            }
+
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                vibratorManager?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (vibrator != null && vibrator.hasVibrator()) {
+                val pattern = longArrayOf(0, 1000, 500, 1000, 500)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0)) // 0 means loop from index 0
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(pattern, 0)
+                }
+                activeVibrator = vibrator
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun stopAlarmSoundAndVibration() {
+        try {
+            activeRingtone?.let {
+                if (it.isPlaying) {
+                    it.stop()
+                }
+            }
+            activeRingtone = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        try {
+            activeVibrator?.cancel()
+            activeVibrator = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     fun sendNotification(title: String, body: String, isTimer: Boolean = false) {
         try {
             // Intent to open the app when notification is clicked
@@ -95,49 +160,6 @@ class NotificationHelper(private val context: Context) {
                 builder.setSound(alarmUri)
                 builder.setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
                 builder.setCategory(NotificationCompat.CATEGORY_ALARM)
-
-                // Play system alarm ringtone programmatically for 4 seconds as a bulletproof foreground fallback
-                try {
-                    val ringtone = RingtoneManager.getRingtone(context, alarmUri)
-                    if (ringtone != null) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            ringtone.audioAttributes = android.media.AudioAttributes.Builder()
-                                .setUsage(android.media.AudioAttributes.USAGE_ALARM)
-                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                                .build()
-                        }
-                        ringtone.play()
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            try {
-                                if (ringtone.isPlaying) {
-                                    ringtone.stop()
-                                }
-                            } catch (ex: Exception) {
-                                ex.printStackTrace()
-                            }
-                        }, 4000)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-
-                // Vibrate device directly for 1 second as robust foreground feedback
-                val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
-                    vibratorManager?.defaultVibrator
-                } else {
-                    @Suppress("DEPRECATION")
-                    context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                }
-
-                if (vibrator != null && vibrator.hasVibrator()) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        vibrator.vibrate(VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE))
-                    } else {
-                        @Suppress("DEPRECATION")
-                        vibrator.vibrate(1000)
-                    }
-                }
             }
 
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

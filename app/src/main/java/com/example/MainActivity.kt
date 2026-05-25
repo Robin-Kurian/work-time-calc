@@ -153,6 +153,7 @@ enum class NavigationTab {
 fun MainContainer(viewModel: WorkViewModel) {
     var selectedTab by rememberSaveable { mutableStateOf(NavigationTab.AutoTracking) }
     val context = LocalContext.current
+    val activeAlarm by viewModel.activeAlarm.collectAsState()
 
     // Permissions check
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -203,6 +204,104 @@ fun MainContainer(viewModel: WorkViewModel) {
                     NavigationTab.AutoTracking -> SessionScreen(viewModel)
                     NavigationTab.ManualTracking -> ManualScreen(viewModel)
                     NavigationTab.Focus -> FocusScreen(viewModel)
+                }
+            }
+        }
+    }
+
+    activeAlarm?.let { alarm ->
+        Dialog(onDismissRequest = { /* Force stop button usage */ }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .border(
+                        1.5.dp,
+                        if (alarm.type == com.example.ui.viewmodel.AlarmType.WORK_TARGET) AccentGreen.copy(alpha = 0.5f) else LightAmber.copy(alpha = 0.5f),
+                        RoundedCornerShape(28.dp)
+                    ),
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1512))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(28.dp)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "alarm_pulse")
+                    val pulseScale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 1.25f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1000, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulse_scale"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .scale(pulseScale)
+                            .background(
+                                color = if (alarm.type == com.example.ui.viewmodel.AlarmType.WORK_TARGET) AccentGreen.copy(alpha = 0.15f) else LightAmber.copy(alpha = 0.15f),
+                                shape = CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Timer,
+                            contentDescription = "Alarm Icon",
+                            tint = if (alarm.type == com.example.ui.viewmodel.AlarmType.WORK_TARGET) AccentGreen else LightAmber,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = alarm.title,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextWhite,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = alarm.message,
+                        fontSize = 14.sp,
+                        color = MutedText,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    Button(
+                        onClick = { viewModel.stopAlarm() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (alarm.type == com.example.ui.viewmodel.AlarmType.WORK_TARGET) AccentGreen else LightAmber,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .border(
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                    ) {
+                        Text(
+                            text = "STOP ALARM",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
             }
         }

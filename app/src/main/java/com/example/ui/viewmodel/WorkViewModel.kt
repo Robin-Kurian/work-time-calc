@@ -38,6 +38,9 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = PreferencesHelper(application)
     private val notificationHelper = NotificationHelper(application)
 
+    private val _activeAlarm = MutableStateFlow<ActiveAlarmState?>(null)
+    val activeAlarm = _activeAlarm.asStateFlow()
+
     // Pomodoro States
     private val _pomodoroMode = MutableStateFlow(PomodoroMode.WORK)
     val pomodoroMode = _pomodoroMode.asStateFlow()
@@ -272,26 +275,45 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 
                 val currentSessions = _sessions.value
+                val workedMinutesToday = calculateWorkedMinutes(currentSessions)
+                val todayStr = getTodayString()
+
                 if (currentSessions.isNotEmpty() && currentSessions.first().outTime == null) {
                     val inTimeMs = currentSessions.first().inTime
                     val elapsedSeconds = (System.currentTimeMillis() - inTimeMs) / 1000
                     _liveActiveElapsedSeconds.value = Math.max(0L, elapsedSeconds)
 
                     // Auto-trigger target reached alarm when reaching 7h 50m today while punched in
-                    val workedMinutesToday = calculateWorkedMinutes(currentSessions)
                     if (workedMinutesToday >= TimeUtils.REQUIRED_MINUTES) {
-                        val todayStr = getTodayString()
                         if (prefs.alarmedDay != todayStr) {
                             prefs.alarmedDay = todayStr
+                            
+                            _activeAlarm.value = ActiveAlarmState(
+                                title = "🎉 Target Reached!",
+                                message = "Time to leave! You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today.",
+                                type = AlarmType.WORK_TARGET
+                            )
+                            notificationHelper.playAlarmSoundAndVibration()
+
                             notificationHelper.sendNotification(
                                 "🎉 Target Reached! Time to leave!",
                                 "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
                                 isTimer = true
                             )
                         }
+                    } else {
+                        // Reset alarmed day if we are punched in but worked minutes are less than target (e.g. edited/deleted sessions)
+                        if (prefs.alarmedDay == todayStr) {
+                            prefs.alarmedDay = ""
+                        }
                     }
                 } else {
                     _liveActiveElapsedSeconds.value = 0L
+
+                    // Also reset alarmed day if they are punched out and worked minutes are less than target
+                    if (workedMinutesToday < TimeUtils.REQUIRED_MINUTES && prefs.alarmedDay == todayStr) {
+                        prefs.alarmedDay = ""
+                    }
                 }
                 delay(1000)
             }
@@ -388,6 +410,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         wifiPollJob?.cancel()
         sessionLoadJob?.cancel()
         pomodoroJob?.cancel()
+        notificationHelper.stopAlarmSoundAndVibration()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (e: Exception) {
@@ -446,6 +469,14 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     if (nextSeconds <= 0) {
                         _pomodoroIsRunning.value = false
                         val modeName = _pomodoroMode.value.displayName
+                        
+                        _activeAlarm.value = ActiveAlarmState(
+                            title = "⏱ Pomodoro Timer Finished",
+                            message = "Your $modeName session is complete.",
+                            type = AlarmType.POMODORO
+                        )
+                        notificationHelper.playAlarmSoundAndVibration()
+
                         notificationHelper.sendNotification(
                             "⏱ Pomodoro Timer Finished",
                             "Your $modeName session is complete.",
@@ -461,6 +492,11 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     fun pausePomodoro() {
         _pomodoroIsRunning.value = false
         pomodoroJob?.cancel()
+    }
+
+    fun stopAlarm() {
+        _activeAlarm.value = null
+        notificationHelper.stopAlarmSoundAndVibration()
     }
 
     fun resetPomodoro() {
@@ -527,3 +563,14 @@ enum class PomodoroMode(val displayName: String, val durationMinutes: Int) {
     BREAK_10("Break (10m)", 10),
     BREAK_15("Break (15m)", 15)
 }
+
+enum class AlarmType {
+    WORK_TARGET,
+    POMODORO
+}
+
+data class ActiveAlarmState(
+    val title: String,
+    val message: String,
+    val type: AlarmType
+)

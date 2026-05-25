@@ -293,12 +293,12 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                                 message = "Time to leave! You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today.",
                                 type = AlarmType.WORK_TARGET
                             )
-                            notificationHelper.playAlarmSoundAndVibration()
 
                             notificationHelper.sendNotification(
                                 "🎉 Target Reached! Time to leave!",
                                 "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
-                                isTimer = true
+                                isTimer = true,
+                                silent = com.example.MainActivity.isForeground
                             )
                         }
                     } else {
@@ -359,7 +359,8 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                         notificationHelper.sendNotification(
                             "🎉 Time to leave!",
                             "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
-                            isTimer = !alreadyAlarmed
+                            isTimer = !alreadyAlarmed,
+                            silent = com.example.MainActivity.isForeground
                         )
                     }
                 }
@@ -475,12 +476,12 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                             message = "Your $modeName session is complete.",
                             type = AlarmType.POMODORO
                         )
-                        notificationHelper.playAlarmSoundAndVibration()
 
                         notificationHelper.sendNotification(
                             "⏱ Pomodoro Timer Finished",
                             "Your $modeName session is complete.",
-                            isTimer = true
+                            isTimer = true,
+                            silent = com.example.MainActivity.isForeground
                         )
                         break
                     }
@@ -497,6 +498,10 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     fun stopAlarm() {
         _activeAlarm.value = null
         notificationHelper.stopAlarmSoundAndVibration()
+    }
+
+    fun playAlarmSoundAndVibration() {
+        notificationHelper.playAlarmSoundAndVibration()
     }
 
     fun resetPomodoro() {

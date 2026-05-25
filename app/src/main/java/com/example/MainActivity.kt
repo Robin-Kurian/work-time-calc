@@ -131,6 +131,10 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        var isForeground = false
+    }
+
     private val viewModel: WorkViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -140,6 +144,16 @@ class MainActivity : ComponentActivity() {
                 MainContainer(viewModel)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        isForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isForeground = false
     }
 }
 
@@ -154,6 +168,12 @@ fun MainContainer(viewModel: WorkViewModel) {
     var selectedTab by rememberSaveable { mutableStateOf(NavigationTab.AutoTracking) }
     val context = LocalContext.current
     val activeAlarm by viewModel.activeAlarm.collectAsState()
+
+    LaunchedEffect(activeAlarm) {
+        if (activeAlarm != null) {
+            viewModel.playAlarmSoundAndVibration()
+        }
+    }
 
     // Permissions check
     val permissionLauncher = rememberLauncherForActivityResult(

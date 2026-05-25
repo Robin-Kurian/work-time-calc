@@ -131,7 +131,7 @@ class NotificationHelper(private val context: Context) {
         }
     }
 
-    fun sendNotification(title: String, body: String, isTimer: Boolean = false) {
+    fun sendNotification(title: String, body: String, isTimer: Boolean = false, silent: Boolean = false) {
         try {
             // Intent to open the app when notification is clicked
             val intent = Intent(context, MainActivity::class.java).apply {
@@ -155,11 +155,15 @@ class NotificationHelper(private val context: Context) {
                 .setAutoCancel(true)
 
             if (isTimer) {
-                val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                builder.setSound(alarmUri)
-                builder.setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
-                builder.setCategory(NotificationCompat.CATEGORY_ALARM)
+                if (silent) {
+                    builder.setSilent(true)
+                } else {
+                    val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    builder.setSound(alarmUri)
+                    builder.setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
+                    builder.setCategory(NotificationCompat.CATEGORY_ALARM)
+                }
             }
 
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

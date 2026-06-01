@@ -43,6 +43,32 @@ object TimeUtils {
         }
     }
 
+    // seconds → e.g. "45s", "1m 20s", "1h 5m 20s"
+    fun fmtDurSeconds(totalSeconds: Long): String {
+        val rounded = Math.max(0L, totalSeconds)
+        if (rounded < 60) {
+            return "${rounded}s"
+        }
+        val h = rounded / 3600
+        val m = (rounded % 3600) / 60
+        val s = rounded % 60
+
+        return buildString {
+            if (h > 0) {
+                append("${h}h")
+            }
+            if (m > 0) {
+                if (isNotEmpty()) append(" ")
+                append("${m}m")
+            }
+            if (s > 0) {
+                if (isNotEmpty()) append(" ")
+                append("${s}s")
+            }
+        }
+    }
+
+
     // timestamp ms → "h:mmam/pm"
     fun fmtTimestamp(ms: Long): String {
         val calendar = Calendar.getInstance()

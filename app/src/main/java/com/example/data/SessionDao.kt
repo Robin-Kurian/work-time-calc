@@ -8,6 +8,9 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE dayString = :day ORDER BY inTime DESC")
     fun getSessionsForDay(day: String): Flow<List<Session>>
 
+    @Query("SELECT * FROM sessions WHERE dayString = :day ORDER BY inTime DESC")
+    suspend fun getSessionsForDaySync(day: String): List<Session>
+
     @Query("SELECT * FROM sessions ORDER BY inTime DESC")
     fun getAllSessions(): Flow<List<Session>>
 

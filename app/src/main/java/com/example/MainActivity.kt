@@ -440,6 +440,7 @@ fun ManualScreen(viewModel: WorkViewModel) {
     val loTime by viewModel.lunchOutTime.collectAsState()
     val liTime by viewModel.lunchInTime.collectAsState()
     val calcState by viewModel.manualCalculationState.collectAsState()
+    val targetMinutes by viewModel.targetWorkMinutes.collectAsState()
 
     val context = LocalContext.current
 
@@ -736,7 +737,7 @@ fun ManualScreen(viewModel: WorkViewModel) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "7h 50m",
+                        text = TimeUtils.fmtDur(targetMinutes),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextWhite
@@ -798,15 +799,16 @@ fun SessionScreen(viewModel: WorkViewModel) {
     val liveActiveSeconds by viewModel.liveActiveElapsedSeconds.collectAsState()
     val isAutoTrackingEnabled by viewModel.isAutoTrackingEnabled.collectAsState()
     val isLocked by viewModel.isLocked.collectAsState()
+    val targetMinutes by viewModel.targetWorkMinutes.collectAsState()
 
     val context = LocalContext.current
 
     var showEditDialogForSession by remember { mutableStateOf<Session?>(null) }
 
     val workedMin = viewModel.calculateWorkedMinutes(sessions)
-    val pct = Math.min(100, Math.round((workedMin.toFloat() / REQUIRED_MINUTES) * 100))
-    val remaining = Math.max(0, REQUIRED_MINUTES - workedMin)
-    val isDone = workedMin >= REQUIRED_MINUTES
+    val pct = Math.min(100, Math.round((workedMin.toFloat() / targetMinutes) * 100))
+    val remaining = Math.max(0, targetMinutes - workedMin)
+    val isDone = workedMin >= targetMinutes
     val isIn = sessions.isNotEmpty() && sessions.first().outTime == null
     val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
 
@@ -932,12 +934,42 @@ fun SessionScreen(viewModel: WorkViewModel) {
 
                 // Work side stats details
                 Column {
-                    Text(
-                        text = "TODAY'S WORK TIME",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MutedText
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    ) {
+                        Text(
+                            text = "TODAY'S TARGET :",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextWhite
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable {
+                                    showDurationPicker(context, targetMinutes) { newMinutes ->
+                                        viewModel.updateTargetWorkMinutes(newMinutes)
+                                    }
+                                }
+                        ) {
+                            Text(
+                                text = TimeUtils.fmtDur(targetMinutes),
+                                fontSize = 10.sp,
+                                color = TextWhite,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = "Edit target time",
+                                tint = MutedText.copy(alpha = 0.6f),
+                                modifier = Modifier.size(10.dp)
+                            )
+                        }
+                    }
                     Text(
                         text = TimeUtils.fmtDur(workedMin),
                         fontSize = 26.sp,
@@ -959,9 +991,9 @@ fun SessionScreen(viewModel: WorkViewModel) {
                         sessions.sumOf { it.outTime?.let { out -> out - it.inTime } ?: 0L }
                     }
                     val targetOutTimeMs = if (isIn) {
-                        sessions.first().inTime + (REQUIRED_MINUTES * 60 * 1000 - completedMs)
+                        sessions.first().inTime + (targetMinutes * 60 * 1000 - completedMs)
                     } else {
-                        System.currentTimeMillis() + (REQUIRED_MINUTES * 60 * 1000 - completedMs)
+                        System.currentTimeMillis() + (targetMinutes * 60 * 1000 - completedMs)
                     }
                     val calTarget = Calendar.getInstance().apply { timeInMillis = targetOutTimeMs }
                     val calToday = Calendar.getInstance()
@@ -1164,10 +1196,10 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     val itemBg = if (isOpen) Color(0x1F10B981) else CardBg
                     val itemBorder = if (isOpen) Color(0x3310B981) else CardBorder
 
-                    val durationMin = if (isOpen) {
-                        (liveActiveSeconds / 60).toInt()
+                    val durationSec = if (isOpen) {
+                        liveActiveSeconds
                     } else {
-                        ((session.outTime!! - session.inTime) / 60000).toInt()
+                        (session.outTime!! - session.inTime) / 1000
                     }
 
                     Card(
@@ -1202,7 +1234,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = TimeUtils.fmtDur(durationMin),
+                                            text = TimeUtils.fmtDurSeconds(durationSec),
                                             fontSize = 18.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = if (isOpen) AccentGreen else TextWhite
@@ -1298,7 +1330,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                     if (index < sessions.size - 1) {
                         val nextSession = sessions[index + 1]
                         if (nextSession.outTime != null) {
-                            val outsideMin = ((session.inTime - nextSession.outTime) / 60000).toInt()
+                            val outsideSec = (session.inTime - nextSession.outTime) / 1000
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1323,7 +1355,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                                             .padding(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Text(
-                                            text = "☕ Outside for ${TimeUtils.fmtDur(outsideMin)}",
+                                            text = "☕ Outside for ${TimeUtils.fmtDurSeconds(outsideSec)}",
                                             fontSize = 11.sp,
                                             color = MutedText,
                                             fontWeight = FontWeight.Medium
@@ -1348,7 +1380,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
 
         // --- FOOTER INFO ---
         val footerText = if (isIn) {
-            val durStr = TimeUtils.fmtDur((liveActiveSeconds / 60).toInt())
+            val durStr = TimeUtils.fmtDurSeconds(liveActiveSeconds)
             "Current session: $durStr · ${sessions.size} session(s) today"
         } else {
             "Punch in to start tracking."
@@ -1613,6 +1645,24 @@ fun showTimePicker(context: Context, currentTime: String, onTimeSelected: (Strin
     ).show()
 }
 
+fun showDurationPicker(context: Context, currentMinutes: Int, onDurationSelected: (Int) -> Unit) {
+    val currentHours = currentMinutes / 60
+    val currentMins = currentMinutes % 60
+
+    TimePickerDialog(
+        context,
+        { _, selectedHour, selectedMinute ->
+            val totalMinutes = selectedHour * 60 + selectedMinute
+            if (totalMinutes > 0) {
+                onDurationSelected(totalMinutes)
+            }
+        },
+        currentHours,
+        currentMins,
+        true
+    ).show()
+}
+
 // Dialog helper for clearance confirmation
 fun showClearConfirmation(context: Context, onConfirmed: () -> Unit) {
     AlertDialog.Builder(context)
@@ -1842,10 +1892,10 @@ fun EditSessionDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // --- LIVE DURATION / ERROR INFO ---
-                val durationMin = if (tempOutTime == null) {
-                    ((System.currentTimeMillis() - tempInTime) / 60000).toInt()
+                val durationSec = if (tempOutTime == null) {
+                    (System.currentTimeMillis() - tempInTime) / 1000
                 } else {
-                    ((tempOutTime!! - tempInTime) / 60000).toInt()
+                    (tempOutTime!! - tempInTime) / 1000
                 }
 
                 if (hasError) {
@@ -1858,9 +1908,9 @@ fun EditSessionDialog(
                     )
                 } else {
                     val durationText = if (tempOutTime == null) {
-                        "Duration: Ongoing (${TimeUtils.fmtDur(durationMin)})"
+                        "Duration: Ongoing (${TimeUtils.fmtDurSeconds(durationSec)})"
                     } else {
-                        "Duration: ${TimeUtils.fmtDur(durationMin)}"
+                        "Duration: ${TimeUtils.fmtDurSeconds(durationSec)}"
                     }
                     Text(
                         text = durationText,

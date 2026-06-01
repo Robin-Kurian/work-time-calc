@@ -2,12 +2,14 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
@@ -15,6 +17,7 @@ import com.example.data.PreferencesHelper
 import com.example.data.Session
 import com.example.data.Task
 import com.example.data.TaskDao
+import com.example.utils.AutoPunchManager
 import com.example.utils.NotificationHelper
 import com.example.utils.TimeUtils
 import kotlinx.coroutines.Job
@@ -79,31 +82,16 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLocked = MutableStateFlow(prefs.isLocked)
     val isLocked = _isLocked.asStateFlow()
 
+    val targetWorkMinutes = MutableStateFlow(prefs.targetWorkMinutes)
+
     // Real-time ticking relative elapsed timer since last Punch In
     private val _liveActiveElapsedSeconds = MutableStateFlow(0L)
     val liveActiveElapsedSeconds = _liveActiveElapsedSeconds.asStateFlow()
 
     // Auto-refresh control jobs
     private var timerJob: Job? = null
-    private var wifiPollJob: Job? = null
     private var sessionLoadJob: Job? = null
     private var isPunching = false
-
-    private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            checkWifiConnectionInstant()
-        }
-
-        override fun onLost(network: Network) {
-            checkWifiConnectionInstant()
-        }
-
-        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            checkWifiConnectionInstant()
-        }
-    }
 
     // Get today's unique date string
     fun getTodayString(): String {
@@ -116,30 +104,21 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         checkMidnightAndLoadSessions()
-        startWifiPolling()
         startLiveTimer()
         loadTasks()
-        
-        val networkRequest = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .build()
-        try {
-            connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        syncWifiService()
     }
 
     // Manual calculation helper properties as combiners
     val manualCalculationState: StateFlow<ManualCalcState> = combine(
-        arrivalTime, lunchOutTime, lunchInTime
-    ) { arr, lo, li ->
+        arrivalTime, lunchOutTime, lunchInTime, targetWorkMinutes
+    ) { arr, lo, li, target ->
         val arrivalMin = TimeUtils.toMin(arr)
         val lunchOutMin = TimeUtils.toMin(lo)
         val lunchInMin = TimeUtils.toMin(li)
 
         val lunchDur = Math.max(0, lunchInMin - lunchOutMin)
-        val leaveMin = arrivalMin + TimeUtils.REQUIRED_MINUTES + lunchDur
+        val leaveMin = arrivalMin + target + lunchDur
         val amWork = Math.max(0, lunchOutMin - (arrivalMin + TimeUtils.BUFFER_IN))
         val pmWork = Math.max(0, leaveMin - TimeUtils.BUFFER_OUT - lunchInMin)
 
@@ -177,10 +156,39 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         checkWifiConnectionInstant()
     }
 
+    fun updateTargetWorkMinutes(minutes: Int) {
+        targetWorkMinutes.value = minutes
+        prefs.targetWorkMinutes = minutes
+        checkWifiConnectionInstant()
+    }
+
+    fun syncWifiService() {
+        val context = getApplication<Application>()
+        val intent = Intent(context, com.example.services.WifiMonitoringService::class.java)
+        if (_isAutoTrackingEnabled.value) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        } else {
+            try {
+                context.stopService(intent)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun toggleAutoTracking() {
         val newState = !_isAutoTrackingEnabled.value
         _isAutoTrackingEnabled.value = newState
         prefs.isAutoTrackingEnabled = newState
+        syncWifiService()
     }
 
     fun toggleLock() {
@@ -219,47 +227,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     fun checkWifiConnectionInstant() {
         viewModelScope.launch {
             val context = getApplication<Application>()
-            val ssid = getActiveWifiSsid(context)
-            val isCurrentlyOnWifi = isActuallyOnWifi(context)
-            
-            val currentS = _sessions.value
-            val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
-            val targetSsid = workSsid.value
-
-            // UI Label Fix
-            if (ssid == null && isCurrentlyOnWifi && isIn) {
-                _currentSsid.value = targetSsid
-            } else {
-                _currentSsid.value = ssid
-            }
-            
-            _lastCheckedTime.value = SimpleDateFormat("h:mm a", Locale.US).format(Date())
-
-            // Auto punch tracking: Skip if LOCKED or DISABLED
-            if (_isAutoTrackingEnabled.value && !_isLocked.value) {
-                if (targetSsid.isNotEmpty()) {
-                    if (ssid == targetSsid && !isIn) {
-                        punch()
-                    } else if (isIn) {
-                        val isDifferentIdentifiableWifi = !ssid.isNullOrEmpty() && ssid != targetSsid && ssid != "<unknown ssid>"
-                        val hasLeftWifiEntirely = !isCurrentlyOnWifi
-                        
-                        if (isDifferentIdentifiableWifi || hasLeftWifiEntirely) {
-                            punch()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun startWifiPolling() {
-        wifiPollJob?.cancel()
-        wifiPollJob = viewModelScope.launch {
-            while (true) {
-                checkWifiConnectionInstant()
-                delay(60000) // Fallback poll every 60 seconds
-            }
+            AutoPunchManager.checkWifiConnection(context)
         }
     }
 
@@ -273,7 +241,10 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     lastCheckedDay = today
                     checkMidnightAndLoadSessions()
                 }
-                
+
+                _currentSsid.value = prefs.currentSsid
+                _lastCheckedTime.value = prefs.lastCheckedTime
+
                 val currentSessions = _sessions.value
                 val workedMinutesToday = calculateWorkedMinutes(currentSessions)
                 val todayStr = getTodayString()
@@ -283,8 +254,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     val elapsedSeconds = (System.currentTimeMillis() - inTimeMs) / 1000
                     _liveActiveElapsedSeconds.value = Math.max(0L, elapsedSeconds)
 
-                    // Auto-trigger target reached alarm when reaching 7h 50m today while punched in
-                    if (workedMinutesToday >= TimeUtils.REQUIRED_MINUTES) {
+                    if (workedMinutesToday >= prefs.targetWorkMinutes) {
                         if (prefs.alarmedDay != todayStr) {
                             prefs.alarmedDay = todayStr
                             
@@ -302,7 +272,6 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                     } else {
-                        // Reset alarmed day if we are punched in but worked minutes are less than target (e.g. edited/deleted sessions)
                         if (prefs.alarmedDay == todayStr) {
                             prefs.alarmedDay = ""
                         }
@@ -310,8 +279,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     _liveActiveElapsedSeconds.value = 0L
 
-                    // Also reset alarmed day if they are punched out and worked minutes are less than target
-                    if (workedMinutesToday < TimeUtils.REQUIRED_MINUTES && prefs.alarmedDay == todayStr) {
+                    if (workedMinutesToday < prefs.targetWorkMinutes && prefs.alarmedDay == todayStr) {
                         prefs.alarmedDay = ""
                     }
                 }
@@ -351,7 +319,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                         "Session: ${TimeUtils.fmtDur(sessionDurMin)} · Total: ${TimeUtils.fmtDur(workedMinutesToday)}"
                     )
 
-                    if (workedMinutesToday >= TimeUtils.REQUIRED_MINUTES) {
+                    if (workedMinutesToday >= prefs.targetWorkMinutes) {
                         val alreadyAlarmed = prefs.alarmedDay == todayStr
                         if (!alreadyAlarmed) {
                             prefs.alarmedDay = todayStr
@@ -364,7 +332,6 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
-                // Reload
                 checkMidnightAndLoadSessions()
             } finally {
                 delay(500)
@@ -387,7 +354,6 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-
     fun clearAllSessions() {
         viewModelScope.launch {
             sessionDao.clearAll()
@@ -408,52 +374,9 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
-        wifiPollJob?.cancel()
         sessionLoadJob?.cancel()
         pomodoroJob?.cancel()
         notificationHelper.stopAlarmSoundAndVibration()
-        try {
-            connectivityManager.unregisterNetworkCallback(networkCallback)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun isActuallyOnWifi(context: Context): Boolean {
-        return try {
-            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = connectivityManager.activeNetwork ?: return false
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun getActiveWifiSsid(context: Context): String? {
-        try {
-            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = connectivityManager.activeNetwork ?: return null
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
-            
-            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                val wifiInfo = capabilities.transportInfo as? WifiInfo
-                var ssid = wifiInfo?.ssid
-
-                if (ssid == null || ssid == "<unknown ssid>" || ssid == "0x") {
-                    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                    ssid = wifiManager.connectionInfo?.ssid
-                }
-
-                val clean = ssid?.replace("\"", "")
-                if (!clean.isNullOrEmpty() && clean != "<unknown ssid>" && clean != "0x") {
-                    return clean
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return null
     }
 
     // Pomodoro logic

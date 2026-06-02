@@ -48,7 +48,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.Icons
+import android.widget.Toast
+import org.dhatim.fastexcel.Workbook
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
@@ -805,6 +808,28 @@ fun SessionScreen(viewModel: WorkViewModel) {
 
     var showEditDialogForSession by remember { mutableStateOf<Session?>(null) }
 
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val todayStr = viewModel.getTodayString()
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    generateLogSheetXlsx(
+                        outputStream = outputStream,
+                        sessions = sessions,
+                        targetMinutes = targetMinutes,
+                        liveActiveSeconds = liveActiveSeconds,
+                        todayStr = todayStr
+                    )
+                }
+                Toast.makeText(context, "Saved Excel log successfully!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to save Excel sheet: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     val workedMin = viewModel.calculateWorkedMinutes(sessions)
     val pct = Math.min(100, Math.round((workedMin.toFloat() / targetMinutes) * 100))
     val remaining = Math.max(0, targetMinutes - workedMin)
@@ -1156,13 +1181,37 @@ fun SessionScreen(viewModel: WorkViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "📋 SESSION LOG",
-                color = MutedText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "📋 SESSION LOG",
+                    color = MutedText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                IconButton(
+                    onClick = {
+                        if (sessions.isEmpty()) {
+                            Toast.makeText(context, "No sessions to download!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val todayStr = viewModel.getTodayString()
+                            val fileName = "work_log_${todayStr.replace(" ", "_")}.xlsx"
+                            createDocumentLauncher.launch(fileName)
+                        }
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Download,
+                        contentDescription = "Download Log Sheet",
+                        tint = AccentGreen,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
             Text(
                 text = "Clear Day",
                 color = AccentGreen,
@@ -2559,3 +2608,173 @@ fun FocusScreen(viewModel: WorkViewModel) {
         }
     }
 }
+
+private fun generateLogSheetXlsx(
+    outputStream: java.io.OutputStream,
+    sessions: List<com.example.data.Session>,
+    targetMinutes: Int,
+    liveActiveSeconds: Long,
+    todayStr: String
+) {
+    val wb = Workbook(outputStream, "WorkTimeCalc", "1.0")
+    val ws = wb.newWorksheet("Work Log")
+
+    // Set standard columns width
+    ws.width(0, 22.0)
+    ws.width(1, 18.0)
+    ws.width(2, 18.0)
+    ws.width(3, 18.0)
+    ws.width(4, 15.0)
+
+    // Title Row
+    ws.value(0, 0, "WORK TIME LOG SHEET")
+    ws.range(0, 0, 0, 4).merge()
+    ws.range(0, 0, 0, 4).style()
+        .bold()
+        .fontSize(14)
+        .horizontalAlignment("center")
+        .fillColor("D1FAE5") // Light pastel green theme
+        .set()
+
+    // Date
+    ws.value(2, 0, "Date")
+    ws.style(2, 0).bold().set()
+    ws.value(2, 1, todayStr)
+
+    // Target Work
+    ws.value(3, 0, "Target Work")
+    ws.style(3, 0).bold().set()
+    ws.value(3, 1, com.example.utils.TimeUtils.fmtDur(targetMinutes))
+
+    // Total Work Time
+    val totalSeconds = sessions.sumOf { session ->
+        val outVal = session.outTime
+        val durationMs = if (outVal == null) {
+            liveActiveSeconds * 1000
+        } else {
+            outVal - session.inTime
+        }
+        durationMs / 1000
+    }
+
+    val workStartMs = sessions.last().inTime
+    val workEndMs = sessions.first().outTime
+
+    val startStr = com.example.utils.TimeUtils.fmtTimestamp(workStartMs)
+    val endStr = if (workEndMs != null) com.example.utils.TimeUtils.fmtTimestamp(workEndMs) else "Ongoing"
+
+    var totalBreakSeconds = 0L
+    val reversed = sessions.reversed()
+    reversed.forEachIndexed { index, session ->
+        if (index < reversed.size - 1) {
+            val nextSession = reversed[index + 1]
+            val outsideSec = (nextSession.inTime - (session.outTime ?: session.inTime)) / 1000
+            if (outsideSec > 0) {
+                totalBreakSeconds += outsideSec
+            }
+        }
+    }
+
+    ws.value(4, 0, "Total Work Time")
+    ws.style(4, 0).bold().set()
+    ws.value(4, 1, com.example.utils.TimeUtils.fmtDurSeconds(totalSeconds))
+    val targetSeconds = targetMinutes * 60L
+    val workRatio = if (targetSeconds > 0) totalSeconds.toDouble() / targetSeconds.toDouble() else 1.0
+    val workColorHex = when {
+        workRatio >= 1.0 -> "10B981" // Green for 100% and above
+        workRatio >= 0.95 -> "D97706" // Amber/Yellow for 95% and above
+        else -> "DC2626" // Red for below 95%
+    }
+    ws.style(4, 1).bold().fontColor(workColorHex).set()
+
+    ws.value(5, 0, "Total Break/Outside")
+    ws.style(5, 0).bold().set()
+    ws.value(5, 1, com.example.utils.TimeUtils.fmtDurSeconds(totalBreakSeconds))
+
+    ws.value(6, 0, "Work Start")
+    ws.style(6, 0).bold().set()
+    ws.value(6, 1, startStr)
+
+    ws.value(7, 0, "Work End")
+    ws.style(7, 0).bold().set()
+    ws.value(7, 1, endStr)
+
+    // Breakdown Header
+    ws.value(9, 0, "TIMELINE BREAKDOWN")
+    ws.range(9, 0, 9, 4).merge()
+    ws.range(9, 0, 9, 4).style()
+        .bold()
+        .fontSize(11)
+        .fillColor("F1F5F9") // Light gray header
+        .set()
+
+    val headers = arrayOf("Activity", "Start/In Time", "End/Out Time", "Duration", "Status")
+    for (i in headers.indices) {
+        ws.value(10, i, headers[i])
+        ws.style(10, i)
+            .bold()
+            .horizontalAlignment("center")
+            .fillColor("E2E8F0")
+            .set()
+    }
+
+    var currentRow = 11
+    reversed.forEachIndexed { index, session ->
+        val sessionNumber = index + 1
+        val inStr = com.example.utils.TimeUtils.fmtTimestamp(session.inTime)
+        val outStr = session.outTime?.let { com.example.utils.TimeUtils.fmtTimestamp(it) } ?: "Ongoing"
+        
+        val isLastOngoing = session.outTime == null
+        val durationSec = if (isLastOngoing) {
+            liveActiveSeconds
+        } else {
+            (session.outTime!! - session.inTime) / 1000
+        }
+        
+        val status = if (isLastOngoing) "Ongoing" else "Completed"
+
+        ws.value(currentRow, 0, "Session $sessionNumber")
+        ws.value(currentRow, 1, inStr)
+        ws.value(currentRow, 2, outStr)
+        ws.value(currentRow, 3, com.example.utils.TimeUtils.fmtDurSeconds(durationSec))
+        ws.value(currentRow, 4, status)
+
+        for (i in 0..4) {
+            ws.style(currentRow, i).horizontalAlignment("center").set()
+        }
+        ws.style(currentRow, 0).bold().set()
+        if (isLastOngoing) {
+            ws.style(currentRow, 4).bold().fontColor("10B981").set()
+        }
+
+        currentRow++
+
+        if (index < reversed.size - 1) {
+            val nextSession = reversed[index + 1]
+            val outsideSec = (nextSession.inTime - (session.outTime ?: session.inTime)) / 1000
+            if (outsideSec > 0) {
+                val breakStart = session.outTime?.let { com.example.utils.TimeUtils.fmtTimestamp(it) } ?: inStr
+                val breakEnd = com.example.utils.TimeUtils.fmtTimestamp(nextSession.inTime)
+
+                ws.value(currentRow, 0, "☕ Break/Outside")
+                ws.value(currentRow, 1, breakStart)
+                ws.value(currentRow, 2, breakEnd)
+                ws.value(currentRow, 3, com.example.utils.TimeUtils.fmtDurSeconds(outsideSec))
+                ws.value(currentRow, 4, "Break")
+
+                for (i in 0..4) {
+                    ws.style(currentRow, i)
+                        .italic()
+                        .horizontalAlignment("center")
+                        .fillColor("F8FAFC")
+                        .set()
+                }
+                
+                currentRow++
+            }
+        }
+    }
+
+    wb.finish()
+}
+

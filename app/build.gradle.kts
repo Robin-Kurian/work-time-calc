@@ -70,6 +70,9 @@ dependencies {
     // Material design icons (extended)
     implementation("androidx.compose.material:material-icons-extended:1.6.1")
 
+    // Excel XLSX Writer
+    implementation("org.dhatim:fastexcel:0.20.1")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

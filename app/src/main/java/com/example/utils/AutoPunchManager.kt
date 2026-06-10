@@ -1,10 +1,6 @@
 package com.example.utils
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.wifi.WifiInfo
-import android.net.wifi.WifiManager
 import com.example.data.AppDatabase
 import com.example.data.PreferencesHelper
 import com.example.data.Session
@@ -24,34 +20,21 @@ object AutoPunchManager {
         val targetSsid = prefs.workSsid
         if (targetSsid.isEmpty()) return
 
-        var ssid: String? = null
-        var isCurrentlyOnWifi = false
-        val maxRetries = 5
+        val db = AppDatabase.getDatabase(context)
+        val todayStr = getTodayString()
+        val currentS = db.sessionDao().getSessionsForDaySync(todayStr)
+        val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
 
-        for (attempt in 1..maxRetries) {
-            ssid = getActiveWifiSsid(context)
-            isCurrentlyOnWifi = isActuallyOnWifi(context)
-
-            // If we are connected and SSID resolved, we are good to go
-            if (isCurrentlyOnWifi && !ssid.isNullOrEmpty() && ssid != "<unknown ssid>" && ssid != "0x") {
-                break
-            }
-
-            // If wifi is off/disconnected completely, no need to retry
-            if (!isCurrentlyOnWifi) {
-                break
-            }
-
-            // Connection is establishing; wait 2s before retry
-            kotlinx.coroutines.delay(2000)
-        }
+        val wifiState = WifiConnectionHelper.readStateWithRetries(
+            context = context,
+            conservative = isIn
+        )
+        val ssid = wifiState.ssid
+        val isCurrentlyOnWifi = wifiState.onWifi
 
         // Store detected SSID
-        val detectedSsid = if (ssid == null && isCurrentlyOnWifi) {
-            val db = AppDatabase.getDatabase(context)
-            val currentS = db.sessionDao().getSessionsForDaySync(getTodayString())
-            val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
-            if (isIn) targetSsid else null
+        val detectedSsid = if (ssid == null && isCurrentlyOnWifi && isIn) {
+            targetSsid
         } else {
             ssid
         }
@@ -59,15 +42,11 @@ object AutoPunchManager {
         prefs.currentSsid = detectedSsid
         prefs.lastCheckedTime = SimpleDateFormat("h:mm a", Locale.US).format(Date())
 
-        val db = AppDatabase.getDatabase(context)
-        val todayStr = getTodayString()
-        val currentS = db.sessionDao().getSessionsForDaySync(todayStr)
-        val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
-
         if (detectedSsid == targetSsid && !isIn) {
             punch(context)
         } else if (isIn) {
-            val isDifferentIdentifiableWifi = !detectedSsid.isNullOrEmpty() && detectedSsid != targetSsid && detectedSsid != "<unknown ssid>"
+            val isDifferentIdentifiableWifi =
+                !detectedSsid.isNullOrEmpty() && detectedSsid != targetSsid
             val hasLeftWifiEntirely = !isCurrentlyOnWifi
 
             if (isDifferentIdentifiableWifi || hasLeftWifiEntirely) {
@@ -78,43 +57,6 @@ object AutoPunchManager {
 
     private fun getTodayString(): String {
         return SimpleDateFormat("EEE MMM dd yyyy", Locale.US).format(Date())
-    }
-
-    private fun isActuallyOnWifi(context: Context): Boolean {
-        return try {
-            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = connectivityManager.activeNetwork ?: return false
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun getActiveWifiSsid(context: Context): String? {
-        try {
-            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = connectivityManager.activeNetwork ?: return null
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
-
-            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                val wifiInfo = capabilities.transportInfo as? WifiInfo
-                var ssid = wifiInfo?.ssid
-
-                if (ssid == null || ssid == "<unknown ssid>" || ssid == "0x") {
-                    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                    ssid = wifiManager.connectionInfo?.ssid
-                }
-
-                val clean = ssid?.replace("\"", "")
-                if (!clean.isNullOrEmpty() && clean != "<unknown ssid>" && clean != "0x") {
-                    return clean
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return null
     }
 
     private suspend fun punch(context: Context) = punchMutex.withLock {
@@ -139,24 +81,26 @@ object AutoPunchManager {
                 val updated = activeSession.copy(outTime = now)
                 sessionDao.updateSession(updated)
 
-                val sessionDurMin = ((now - activeSession.inTime) / 60000).toInt()
-                val workedMinutesToday = calculateWorkedMinutes(currentSessions.map {
+                val sessionDurSec = (now - activeSession.inTime) / 1000
+                val workedMs = calculateWorkedMs(currentSessions.map {
                     if (it.id == activeSession.id) updated else it
                 })
+                val targetMs = prefs.targetWorkMinutes * 60_000L
+                val isDone = targetMs > 0 && workedMs >= targetMs
 
                 notificationHelper.sendNotification(
                     "🔴 Punched Out",
-                    "Session: ${TimeUtils.fmtDur(sessionDurMin)} · Total: ${TimeUtils.fmtDur(workedMinutesToday)}"
+                    "Session: ${TimeUtils.fmtDurSeconds(sessionDurSec)} · Total: ${TimeUtils.fmtDurSeconds(workedMs / 1000)}"
                 )
 
-                if (workedMinutesToday >= prefs.targetWorkMinutes) {
+                if (isDone) {
                     val alreadyAlarmed = prefs.alarmedDay == todayStr
                     if (!alreadyAlarmed) {
                         prefs.alarmedDay = todayStr
                     }
                     notificationHelper.sendNotification(
                         "🎉 Time to leave!",
-                        "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
+                        "You've worked ${TimeUtils.fmtDurSeconds(workedMs / 1000)} today",
                         isTimer = !alreadyAlarmed,
                         silent = com.example.MainActivity.isForeground
                     )
@@ -167,13 +111,7 @@ object AutoPunchManager {
         }
     }
 
-    private fun calculateWorkedMinutes(sessionList: List<Session>): Int {
-        val now = System.currentTimeMillis()
-        var totalMs = 0L
-        for (s in sessionList) {
-            val outTime = s.outTime ?: now
-            totalMs += (outTime - s.inTime)
-        }
-        return (totalMs / 60000).toInt()
+    private fun calculateWorkedMs(sessionList: List<Session>, nowMs: Long = System.currentTimeMillis()): Long {
+        return sessionList.sumOf { s -> (s.outTime ?: nowMs) - s.inTime }
     }
 }

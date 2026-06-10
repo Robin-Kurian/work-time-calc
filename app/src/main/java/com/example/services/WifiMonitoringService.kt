@@ -20,14 +20,17 @@ import com.example.data.PreferencesHelper
 import com.example.utils.AutoPunchManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class WifiMonitoringService : Service() {
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private var pendingCheckJob: Job? = null
 
     private lateinit var connectivityManager: ConnectivityManager
     private lateinit var prefs: PreferencesHelper
@@ -35,19 +38,23 @@ class WifiMonitoringService : Service() {
     companion object {
         private const val CHANNEL_ID = "wifi_monitoring_service_channel"
         private const val NOTIFICATION_ID = 9999
+        private const val DISCONNECT_DEBOUNCE_MS = 4000L
+        private const val CONNECT_DEBOUNCE_MS = 1000L
     }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            triggerCheck()
+            triggerCheck(connectDelayMs = CONNECT_DEBOUNCE_MS)
         }
 
         override fun onLost(network: Network) {
-            triggerCheck()
+            triggerCheck(disconnectDelayMs = DISCONNECT_DEBOUNCE_MS)
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            triggerCheck()
+            if (networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                triggerCheck(connectDelayMs = CONNECT_DEBOUNCE_MS)
+            }
         }
     }
 
@@ -93,8 +100,16 @@ class WifiMonitoringService : Service() {
         }
     }
 
-    private fun triggerCheck() {
-        serviceScope.launch {
+    private fun triggerCheck(
+        connectDelayMs: Long = 0,
+        disconnectDelayMs: Long = 0
+    ) {
+        val delayMs = maxOf(connectDelayMs, disconnectDelayMs)
+        pendingCheckJob?.cancel()
+        pendingCheckJob = serviceScope.launch {
+            if (delayMs > 0) {
+                delay(delayMs)
+            }
             AutoPunchManager.checkWifiConnection(applicationContext)
         }
     }

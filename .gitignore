@@ -21,6 +21,8 @@ app/release/
 
 # Gradle files
 .gradle/
+# Local build output redirected off external volumes (see root build.gradle.kts)
+local-builds/
 
 # Local configuration files (sdk path, etc.)
 local.properties
@@ -41,5 +43,6 @@ captures/
 
 # OS/System files
 .DS_Store
+._*
 Thumbs.db
 

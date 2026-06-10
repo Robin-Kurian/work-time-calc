@@ -4,6 +4,32 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// macOS creates AppleDouble (._*) files on non-APFS volumes (e.g. exFAT external drives),
+// which break Android resource parsing and KSP incremental output copying.
+tasks.register("removeAppleDoubleFiles") {
+    doLast {
+        listOf(layout.buildDirectory.get().asFile, project.projectDir).forEach { root ->
+            if (!root.exists()) return@forEach
+            root.walkTopDown()
+                .filter { it.isFile && it.name.startsWith("._") }
+                .forEach { it.delete() }
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("ksp") }.configureEach {
+    dependsOn("removeAppleDoubleFiles")
+}
+tasks.matching { it.name.contains("package") && it.name.contains("Resources") }.configureEach {
+    finalizedBy("removeAppleDoubleFiles")
+}
+tasks.matching { it.name.contains("parse") && it.name.contains("Resources") }.configureEach {
+    dependsOn("removeAppleDoubleFiles")
+}
+tasks.matching { it.name.contains("process") && it.name.contains("Resources") }.configureEach {
+    dependsOn("removeAppleDoubleFiles")
+}
+
 android {
     namespace = "com.example"
     compileSdk = 34

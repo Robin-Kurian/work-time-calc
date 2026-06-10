@@ -246,27 +246,29 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                 _lastCheckedTime.value = prefs.lastCheckedTime
 
                 val currentSessions = _sessions.value
-                val workedMinutesToday = calculateWorkedMinutes(currentSessions)
                 val todayStr = getTodayString()
+                val nowMs = System.currentTimeMillis()
+                val totalMs = calculateWorkedMs(currentSessions, nowMs)
+                val targetMs = prefs.targetWorkMinutes * 60_000L
 
                 if (currentSessions.isNotEmpty() && currentSessions.first().outTime == null) {
                     val inTimeMs = currentSessions.first().inTime
-                    val elapsedSeconds = (System.currentTimeMillis() - inTimeMs) / 1000
+                    val elapsedSeconds = (nowMs - inTimeMs) / 1000
                     _liveActiveElapsedSeconds.value = Math.max(0L, elapsedSeconds)
 
-                    if (workedMinutesToday >= prefs.targetWorkMinutes) {
+                    if (totalMs >= targetMs && targetMs > 0) {
                         if (prefs.alarmedDay != todayStr) {
                             prefs.alarmedDay = todayStr
                             
                             _activeAlarm.value = ActiveAlarmState(
                                 title = "🎉 Target Reached!",
-                                message = "Time to leave! You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today.",
+                                message = "Time to leave! You've worked ${TimeUtils.fmtDurSeconds(totalMs / 1000)} today.",
                                 type = AlarmType.WORK_TARGET
                             )
 
                             notificationHelper.sendNotification(
                                 "🎉 Target Reached! Time to leave!",
-                                "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
+                                "You've worked ${TimeUtils.fmtDurSeconds(totalMs / 1000)} today",
                                 isTimer = true,
                                 silent = com.example.MainActivity.isForeground
                             )
@@ -279,7 +281,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     _liveActiveElapsedSeconds.value = 0L
 
-                    if (workedMinutesToday < prefs.targetWorkMinutes && prefs.alarmedDay == todayStr) {
+                    if (totalMs < targetMs && prefs.alarmedDay == todayStr) {
                         prefs.alarmedDay = ""
                     }
                 }
@@ -309,24 +311,24 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     val updated = activeSession.copy(outTime = now)
                     sessionDao.updateSession(updated)
 
-                    val sessionDurMin = ((now - activeSession.inTime) / 60000).toInt()
-                    val workedMinutesToday = calculateWorkedMinutes(currentSessions.map {
+                    val sessionDurSec = (now - activeSession.inTime) / 1000
+                    val progress = getWorkProgress(currentSessions.map {
                         if (it.id == activeSession.id) updated else it
-                    })
+                    }, prefs.targetWorkMinutes)
 
                     notificationHelper.sendNotification(
                         "🔴 Punched Out",
-                        "Session: ${TimeUtils.fmtDur(sessionDurMin)} · Total: ${TimeUtils.fmtDur(workedMinutesToday)}"
+                        "Session: ${TimeUtils.fmtDurSeconds(sessionDurSec)} · Total: ${TimeUtils.fmtDurSeconds(progress.workedMs / 1000)}"
                     )
 
-                    if (workedMinutesToday >= prefs.targetWorkMinutes) {
+                    if (progress.isDone) {
                         val alreadyAlarmed = prefs.alarmedDay == todayStr
                         if (!alreadyAlarmed) {
                             prefs.alarmedDay = todayStr
                         }
                         notificationHelper.sendNotification(
                             "🎉 Time to leave!",
-                            "You've worked ${TimeUtils.fmtDur(workedMinutesToday)} today",
+                            "You've worked ${TimeUtils.fmtDurSeconds(progress.workedMs / 1000)} today",
                             isTimer = !alreadyAlarmed,
                             silent = com.example.MainActivity.isForeground
                         )
@@ -361,14 +363,34 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun calculateWorkedMs(sessionList: List<Session>, nowMs: Long = System.currentTimeMillis()): Long {
+        return sessionList.sumOf { s -> (s.outTime ?: nowMs) - s.inTime }
+    }
+
     fun calculateWorkedMinutes(sessionList: List<Session>): Int {
-        val now = System.currentTimeMillis()
-        var totalMs = 0L
-        for (s in sessionList) {
-            val outTime = s.outTime ?: now
-            totalMs += (outTime - s.inTime)
+        return (calculateWorkedMs(sessionList) / 60_000).toInt()
+    }
+
+    fun getWorkProgress(sessionList: List<Session>, targetMinutes: Int): WorkProgress {
+        val workedMs = calculateWorkedMs(sessionList)
+        val targetMs = targetMinutes.coerceAtLeast(0) * 60_000L
+        val isDone = targetMs > 0 && workedMs >= targetMs
+        val percent = when {
+            targetMs <= 0 -> 0
+            isDone -> 100
+            else -> ((workedMs * 100) / targetMs).toInt()
         }
-        return (totalMs / 60000).toInt()
+        val workedMin = (workedMs / 60_000).toInt()
+        val remainingMs = (targetMs - workedMs).coerceAtLeast(0)
+        val remainingMin = ((remainingMs + 59_999) / 60_000).toInt()
+        return WorkProgress(
+            workedMs = workedMs,
+            workedMin = workedMin,
+            percent = percent,
+            remainingMs = remainingMs,
+            remainingMin = remainingMin,
+            isDone = isDone
+        )
     }
 
     override fun onCleared() {
@@ -476,6 +498,15 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
+
+data class WorkProgress(
+    val workedMs: Long,
+    val workedMin: Int,
+    val percent: Int,
+    val remainingMs: Long,
+    val remainingMin: Int,
+    val isDone: Boolean
+)
 
 data class ManualCalcState(
     val arrivalMin: Int,

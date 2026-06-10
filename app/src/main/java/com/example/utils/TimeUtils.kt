@@ -10,6 +10,9 @@ object TimeUtils {
     const val REQUIRED_MINUTES = 470
     const val BUFFER_IN = 5
     const val BUFFER_OUT = 5
+    private const val LUNCH_WINDOW_START_MIN = 12 * 60   // 12:00 pm
+    private const val LUNCH_WINDOW_END_MIN = 15 * 60     // 3:00 pm
+    private const val LUNCH_MIN_OUTSIDE_SEC = 19 * 60    // > 19 minutes
 
     // "HH:MM" → total minutes
     fun toMin(t: String): Int {
@@ -103,6 +106,23 @@ object TimeUtils {
             String.format(Locale.US, "%d:%02d:%02d", hh, mm, ss)
         } else {
             String.format(Locale.US, "%d:%02d", mm, ss)
+        }
+    }
+
+    fun isLunchBreak(outTimeMs: Long, outsideSeconds: Long): Boolean {
+        if (outsideSeconds <= LUNCH_MIN_OUTSIDE_SEC) return false
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = outTimeMs
+        val outMin = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+        return outMin in LUNCH_WINDOW_START_MIN..LUNCH_WINDOW_END_MIN
+    }
+
+    fun formatOutsideBreak(outTimeMs: Long, outsideSeconds: Long): String {
+        val duration = fmtDurSeconds(outsideSeconds)
+        return if (isLunchBreak(outTimeMs, outsideSeconds)) {
+            "🍔 Lunch break for $duration"
+        } else {
+            "☕ Outside for $duration"
         }
     }
 

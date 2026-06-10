@@ -114,6 +114,12 @@ case "$( uname )" in                #(
   NONSTOP* )        nonstop=true ;;
 esac
 
+# Prevent macOS from writing AppleDouble (._*) sidecars on non-APFS volumes during builds.
+if [ "$darwin" = "true" ]; then
+    export COPYFILE_DISABLE=1
+    export COPY_EXTENDED_ATTRIBUTES_DISABLE=1
+fi
+
 
 
 # Determine the Java command to use to start the JVM.

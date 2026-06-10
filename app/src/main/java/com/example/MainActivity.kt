@@ -830,13 +830,12 @@ fun SessionScreen(viewModel: WorkViewModel) {
         }
     }
 
-    val workedMin = viewModel.calculateWorkedMinutes(sessions)
-    val pct = Math.min(100, Math.round((workedMin.toFloat() / targetMinutes) * 100))
-    val remaining = Math.max(0, targetMinutes - workedMin)
-    val isDone = workedMin >= targetMinutes
+    val progress = viewModel.getWorkProgress(sessions, targetMinutes)
+    val workedMs = progress.workedMs
+    val pct = progress.percent
+    val isDone = progress.isDone
     val isIn = sessions.isNotEmpty() && sessions.first().outTime == null
     val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
-
 
     Column(
         modifier = Modifier
@@ -996,30 +995,21 @@ fun SessionScreen(viewModel: WorkViewModel) {
                         }
                     }
                     Text(
-                        text = TimeUtils.fmtDur(workedMin),
+                        text = TimeUtils.fmtDurSeconds(workedMs / 1000),
                         fontSize = 26.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextWhite
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isDone) "✓ Target reached!" else "Remaining: ${TimeUtils.fmtDur(remaining.toInt())}",
+                        text = if (isDone) "✓ Target reached!" else "Remaining: ${TimeUtils.fmtDurSeconds(progress.remainingMs / 1000)}",
                         fontSize = 12.sp,
                         color = if (isDone) LightAmber else AccentGreen,
                         fontWeight = FontWeight.Bold
                     )
 
-                    // Projected leave time calculation
-                    val completedMs = if (isIn) {
-                        sessions.drop(1).sumOf { it.outTime?.let { out -> out - it.inTime } ?: 0L }
-                    } else {
-                        sessions.sumOf { it.outTime?.let { out -> out - it.inTime } ?: 0L }
-                    }
-                    val targetOutTimeMs = if (isIn) {
-                        sessions.first().inTime + (targetMinutes * 60 * 1000 - completedMs)
-                    } else {
-                        System.currentTimeMillis() + (targetMinutes * 60 * 1000 - completedMs)
-                    }
+                    // Projected leave time: now + remaining work
+                    val targetOutTimeMs = System.currentTimeMillis() + progress.remainingMs
                     val calTarget = Calendar.getInstance().apply { timeInMillis = targetOutTimeMs }
                     val calToday = Calendar.getInstance()
                     val isTomorrow = calTarget.get(Calendar.DAY_OF_YEAR) != calToday.get(Calendar.DAY_OF_YEAR) ||
@@ -1053,7 +1043,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                         color = LightAmber
                     )
                     Text(
-                        text = "You've worked ${TimeUtils.fmtDur(workedMin)} today",
+                        text = "You've worked ${TimeUtils.fmtDurSeconds(workedMs / 1000)} today",
                         fontSize = 12.sp,
                         color = LightAmber.copy(alpha = 0.8f)
                     )
@@ -1404,7 +1394,7 @@ fun SessionScreen(viewModel: WorkViewModel) {
                                             .padding(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Text(
-                                            text = "☕ Outside for ${TimeUtils.fmtDurSeconds(outsideSec)}",
+                                            text = TimeUtils.formatOutsideBreak(nextSession.outTime!!, outsideSec),
                                             fontSize = 11.sp,
                                             color = MutedText,
                                             fontWeight = FontWeight.Medium
@@ -2756,11 +2746,12 @@ private fun generateLogSheetXlsx(
                 val breakStart = session.outTime?.let { com.example.utils.TimeUtils.fmtTimestamp(it) } ?: inStr
                 val breakEnd = com.example.utils.TimeUtils.fmtTimestamp(nextSession.inTime)
 
-                ws.value(currentRow, 0, "☕ Break/Outside")
+                val isLunch = com.example.utils.TimeUtils.isLunchBreak(session.outTime!!, outsideSec)
+                ws.value(currentRow, 0, if (isLunch) "🍔 Lunch Break" else "☕ Break/Outside")
                 ws.value(currentRow, 1, breakStart)
                 ws.value(currentRow, 2, breakEnd)
                 ws.value(currentRow, 3, com.example.utils.TimeUtils.fmtDurSeconds(outsideSec))
-                ws.value(currentRow, 4, "Break")
+                ws.value(currentRow, 4, if (isLunch) "Lunch" else "Break")
 
                 for (i in 0..4) {
                     ws.style(currentRow, i)

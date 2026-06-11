@@ -85,7 +85,7 @@ fun TodayScreen(
     val workedMs = progress.workedMs
     val pct = progress.percent
     val isDone = progress.isDone
-    val isIn = sessions.isNotEmpty() && sessions.first().outTime == null
+    val isIn = sessions.any { it.outTime == null }
     val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
 
     val dateSubtitle = remember {
@@ -315,14 +315,19 @@ fun TodayScreen(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         } else {
+            val orderedSessions = sessions.sortedByDescending { it.inTime }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                val previewSessions = if (sessions.size == 1) {
-                    listOf(sessions.first() to 1)
+                val previewSessions = if (orderedSessions.size == 1) {
+                    listOf(orderedSessions.first() to 1)
                 } else {
+                    val currentSession = orderedSessions.firstOrNull { it.outTime == null } ?: orderedSessions.first()
+                    val currentSessionNumber = orderedSessions.indexOf(currentSession) + 1
+                    val firstSession = orderedSessions.last()
+
                     listOf(
-                        sessions.last() to sessions.size,
-                        sessions.first() to 1
-                    )
+                        currentSession to currentSessionNumber,
+                        firstSession to orderedSessions.size
+                    ).distinctBy { it.first.id }
                 }
 
                 previewSessions.forEachIndexed { index, (session, sessionNumber) ->
@@ -339,9 +344,9 @@ fun TodayScreen(
                         onDelete = { showSessionLog = true }
                     )
 
-                    if (index == 0 && sessions.size > 1) {
-                        val oldest = sessions.last()
-                        val totalOutsideSec = TimeUtils.totalOutsideSeconds(sessions)
+                    if (index == 0 && previewSessions.size > 1) {
+                        val oldest = orderedSessions.last()
+                        val totalOutsideSec = TimeUtils.totalOutsideSeconds(orderedSessions)
                         if (totalOutsideSec > 0 && oldest.outTime != null) {
                             SessionBreakDivider(
                                 outsideSec = totalOutsideSec,

@@ -42,7 +42,19 @@ captures/
 .cxx/
 
 # OS/System files
+# macOS Finder metadata and AppleDouble sidecar files
 .DS_Store
+.DS_Store?
 ._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100/
+.Trashes/
+.fseventsd
+.TemporaryItems/
+.apdisk
+__MACOSX/
+
+# Windows Explorer metadata
 Thumbs.db
 

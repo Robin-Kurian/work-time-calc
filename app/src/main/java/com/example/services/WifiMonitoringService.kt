@@ -30,7 +30,8 @@ class WifiMonitoringService : Service() {
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
-    private var pendingCheckJob: Job? = null
+    private var connectCheckJob: Job? = null
+    private var disconnectCheckJob: Job? = null
 
     private lateinit var connectivityManager: ConnectivityManager
     private lateinit var prefs: PreferencesHelper
@@ -38,23 +39,26 @@ class WifiMonitoringService : Service() {
     companion object {
         private const val CHANNEL_ID = "wifi_monitoring_service_channel"
         private const val NOTIFICATION_ID = 9999
-        private const val DISCONNECT_DEBOUNCE_MS = 4000L
-        private const val CONNECT_DEBOUNCE_MS = 1000L
+        private const val DISCONNECT_DEBOUNCE_MS = 3000L
+        private const val CONNECT_DEBOUNCE_MS = 1500L
     }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            triggerCheck(connectDelayMs = CONNECT_DEBOUNCE_MS)
+            scheduleConnectCheck()
         }
 
         override fun onLost(network: Network) {
-            triggerCheck(disconnectDelayMs = DISCONNECT_DEBOUNCE_MS)
+            scheduleDisconnectCheck()
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            if (networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                triggerCheck(connectDelayMs = CONNECT_DEBOUNCE_MS)
+            if (!networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return
+            if (!networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED)) {
+                scheduleDisconnectCheck()
+                return
             }
+            scheduleConnectCheck()
         }
     }
 
@@ -74,8 +78,7 @@ class WifiMonitoringService : Service() {
             e.printStackTrace()
         }
 
-        // Initial check
-        triggerCheck()
+        runWifiCheck(delayMs = 0)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -92,6 +95,8 @@ class WifiMonitoringService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        connectCheckJob?.cancel()
+        disconnectCheckJob?.cancel()
         serviceJob.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
@@ -100,16 +105,28 @@ class WifiMonitoringService : Service() {
         }
     }
 
-    private fun triggerCheck(
-        connectDelayMs: Long = 0,
-        disconnectDelayMs: Long = 0
-    ) {
-        val delayMs = maxOf(connectDelayMs, disconnectDelayMs)
-        pendingCheckJob?.cancel()
-        pendingCheckJob = serviceScope.launch {
-            if (delayMs > 0) {
-                delay(delayMs)
-            }
+    private fun scheduleConnectCheck() {
+        disconnectCheckJob?.cancel()
+        connectCheckJob?.cancel()
+        connectCheckJob = serviceScope.launch {
+            delay(CONNECT_DEBOUNCE_MS)
+            AutoPunchManager.checkWifiConnection(applicationContext)
+        }
+    }
+
+    private fun scheduleDisconnectCheck() {
+        connectCheckJob?.cancel()
+        disconnectCheckJob?.cancel()
+        disconnectCheckJob = serviceScope.launch {
+            delay(DISCONNECT_DEBOUNCE_MS)
+            AutoPunchManager.checkWifiConnection(applicationContext)
+        }
+    }
+
+    private fun runWifiCheck(delayMs: Long) {
+        disconnectCheckJob?.cancel()
+        disconnectCheckJob = serviceScope.launch {
+            if (delayMs > 0) delay(delayMs)
             AutoPunchManager.checkWifiConnection(applicationContext)
         }
     }

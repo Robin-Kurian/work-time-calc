@@ -6,14 +6,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val Typography = Typography(
+fun appTypography(colors: AppColors) = Typography(
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.5.sp,
-        color = TextWhite
+        color = colors.textPrimary
     ),
     titleLarge = TextStyle(
         fontFamily = FontFamily.Default,
@@ -21,7 +21,7 @@ val Typography = Typography(
         fontSize = 22.sp,
         lineHeight = 28.sp,
         letterSpacing = 0.sp,
-        color = TextWhite
+        color = colors.textPrimary
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.Default,
@@ -29,6 +29,6 @@ val Typography = Typography(
         fontSize = 11.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp,
-        color = MutedText
+        color = colors.mutedText
     )
 )

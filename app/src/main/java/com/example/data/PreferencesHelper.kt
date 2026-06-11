@@ -15,9 +15,11 @@ class PreferencesHelper(context: Context) {
         private const val KEY_AUTO_TRACKING = "auto_tracking_enabled"
         private const val KEY_IS_LOCKED = "session_locked"
         private const val KEY_ALARMED_DAY = "alarmed_day"
+        private const val KEY_ALARM_ENABLED = "alarm_enabled"
         private const val KEY_TARGET_MINUTES = "target_work_minutes"
         private const val KEY_CURRENT_SSID = "current_ssid"
         private const val KEY_LAST_CHECKED = "last_checked"
+        private const val KEY_DARK_THEME = "dark_theme"
     }
 
     var arrivalTime: String
@@ -52,6 +54,10 @@ class PreferencesHelper(context: Context) {
         get() = prefs.getString(KEY_ALARMED_DAY, "") ?: ""
         set(value) = prefs.edit().putString(KEY_ALARMED_DAY, value).apply()
 
+    var isAlarmEnabled: Boolean
+        get() = prefs.getBoolean(KEY_ALARM_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_ALARM_ENABLED, value).apply()
+
     var targetWorkMinutes: Int
         get() = prefs.getInt(KEY_TARGET_MINUTES, 480)
         set(value) = prefs.edit().putInt(KEY_TARGET_MINUTES, value).apply()
@@ -63,4 +69,8 @@ class PreferencesHelper(context: Context) {
     var lastCheckedTime: String
         get() = prefs.getString(KEY_LAST_CHECKED, "") ?: ""
         set(value) = prefs.edit().putString(KEY_LAST_CHECKED, value).apply()
+
+    var isDarkTheme: Boolean
+        get() = prefs.getBoolean(KEY_DARK_THEME, false)
+        set(value) = prefs.edit().putBoolean(KEY_DARK_THEME, value).apply()
 }

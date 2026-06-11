@@ -1,5 +1,7 @@
 package com.example.utils
 
+import android.app.KeyguardManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -11,14 +13,53 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
+import com.example.receivers.AlarmStopReceiver
 
 class NotificationHelper(private val context: Context) {
 
     companion object {
         private const val PUNCH_CHANNEL_ID = "work_time_tracker_punch_alerts_v3"
         private const val PUNCH_CHANNEL_NAME = "Punch Alerts"
-        private const val TIMER_CHANNEL_ID = "work_time_tracker_timer_alerts_v3"
+        private const val TIMER_CHANNEL_ID = "work_time_tracker_timer_alerts_v4"
         private const val TIMER_CHANNEL_NAME = "Timer Alerts"
+        const val ALARM_NOTIFICATION_ID = 9001
+
+        @Volatile
+        private var activeRingtone: android.media.Ringtone? = null
+
+        @Volatile
+        private var activeVibrator: Vibrator? = null
+
+        fun isDeviceLocked(context: Context): Boolean {
+            val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            return keyguardManager.isKeyguardLocked
+        }
+
+        fun stopAlarmGlobally(context: Context) {
+            stopRingtoneAndVibration()
+            val notificationManager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(ALARM_NOTIFICATION_ID)
+        }
+
+        private fun stopRingtoneAndVibration() {
+            try {
+                activeRingtone?.let {
+                    if (it.isPlaying) {
+                        it.stop()
+                    }
+                }
+                activeRingtone = null
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            try {
+                activeVibrator?.cancel()
+                activeVibrator = null
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     init {
@@ -28,9 +69,9 @@ class NotificationHelper(private val context: Context) {
     private fun createNotificationChannel() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                
-                // 1. General Punch channel
+                val notificationManager =
+                    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
                 val punchChannel = NotificationChannel(
                     PUNCH_CHANNEL_ID,
                     PUNCH_CHANNEL_NAME,
@@ -40,10 +81,9 @@ class NotificationHelper(private val context: Context) {
                 }
                 notificationManager.createNotificationChannel(punchChannel)
 
-                // 2. Loud Timer channel using system default alarm sound
                 val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                     ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                
+
                 val audioAttributes = android.media.AudioAttributes.Builder()
                     .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .setUsage(android.media.AudioAttributes.USAGE_ALARM)
@@ -58,6 +98,7 @@ class NotificationHelper(private val context: Context) {
                     setSound(alarmUri, audioAttributes)
                     enableVibration(true)
                     vibrationPattern = longArrayOf(0, 500, 250, 500, 250, 500)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
                 notificationManager.createNotificationChannel(timerChannel)
             }
@@ -66,11 +107,8 @@ class NotificationHelper(private val context: Context) {
         }
     }
 
-    private var activeRingtone: android.media.Ringtone? = null
-    private var activeVibrator: Vibrator? = null
-
     fun playAlarmSoundAndVibration() {
-        stopAlarmSoundAndVibration() // Ensure any prior alarm is stopped
+        stopRingtoneAndVibration()
         try {
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -90,7 +128,8 @@ class NotificationHelper(private val context: Context) {
             }
 
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE)
+                    as? android.os.VibratorManager
                 vibratorManager?.defaultVibrator
             } else {
                 @Suppress("DEPRECATION")
@@ -100,7 +139,7 @@ class NotificationHelper(private val context: Context) {
             if (vibrator != null && vibrator.hasVibrator()) {
                 val pattern = longArrayOf(0, 1000, 500, 1000, 500)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0)) // 0 means loop from index 0
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
                 } else {
                     @Suppress("DEPRECATION")
                     vibrator.vibrate(pattern, 0)
@@ -113,19 +152,66 @@ class NotificationHelper(private val context: Context) {
     }
 
     fun stopAlarmSoundAndVibration() {
+        stopRingtoneAndVibration()
+    }
+
+    fun dismissAlarmNotification() {
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(ALARM_NOTIFICATION_ID)
+    }
+
+    fun showAlarmNotification(title: String, body: String, silent: Boolean) {
         try {
-            activeRingtone?.let {
-                if (it.isPlaying) {
-                    it.stop()
-                }
+            val openIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
-            activeRingtone = null
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        try {
-            activeVibrator?.cancel()
-            activeVibrator = null
+            val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+
+            val contentPendingIntent = PendingIntent.getActivity(context, 2, openIntent, pendingIntentFlags)
+            val fullScreenPendingIntent = PendingIntent.getActivity(context, 3, openIntent, pendingIntentFlags)
+
+            val stopIntent = Intent(context, AlarmStopReceiver::class.java).apply {
+                action = AlarmStopReceiver.ACTION_STOP_ALARM
+            }
+            val stopPendingIntent = PendingIntent.getBroadcast(context, 4, stopIntent, pendingIntentFlags)
+
+            val builder = NotificationCompat.Builder(context, TIMER_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setContentIntent(contentPendingIntent)
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .addAction(
+                    android.R.drawable.ic_media_pause,
+                    "Stop Alarm",
+                    stopPendingIntent
+                )
+
+            if (silent) {
+                builder.setSilent(true)
+            } else {
+                val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                builder.setSound(alarmUri)
+                builder.setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
+            }
+
+            val notificationManager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(ALARM_NOTIFICATION_ID, builder.build())
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -133,16 +219,21 @@ class NotificationHelper(private val context: Context) {
 
     fun sendNotification(title: String, body: String, isTimer: Boolean = false, silent: Boolean = false) {
         try {
-            // Intent to open the app when notification is clicked
             val intent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
 
             val pendingIntent = PendingIntent.getActivity(
                 context,
                 0,
                 intent,
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_UPDATE_CURRENT
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
             )
 
             val channelId = if (isTimer) TIMER_CHANNEL_ID else PUNCH_CHANNEL_ID
@@ -155,6 +246,8 @@ class NotificationHelper(private val context: Context) {
                 .setAutoCancel(true)
 
             if (isTimer) {
+                builder.setCategory(NotificationCompat.CATEGORY_ALARM)
+                builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 if (silent) {
                     builder.setSilent(true)
                 } else {
@@ -162,15 +255,14 @@ class NotificationHelper(private val context: Context) {
                         ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
                     builder.setSound(alarmUri)
                     builder.setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
-                    builder.setCategory(NotificationCompat.CATEGORY_ALARM)
                 }
             }
 
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val notificationManager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.notify((System.currentTimeMillis() % 100000).toInt(), builder.build())
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 }
-

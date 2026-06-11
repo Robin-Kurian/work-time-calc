@@ -3,10 +3,18 @@ package com.example.utils
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.wifi.SupplicantState
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import kotlinx.coroutines.delay
 
+/** Strict live snapshot used for punch decisions — never uses stale SSID cache. */
+data class WifiSnapshot(
+    val linkUp: Boolean,
+    val ssid: String?
+)
+
+/** Looser state for UI display only. */
 data class WifiConnectionState(
     val onWifi: Boolean,
     val ssid: String?
@@ -14,78 +22,129 @@ data class WifiConnectionState(
 
 object WifiConnectionHelper {
 
-    fun readState(context: Context): WifiConnectionState {
+    fun captureSnapshot(context: Context): WifiSnapshot {
+        val wifiManager =
+            context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+
+        if (!isSupplicantConnected(wifiManager)) {
+            return WifiSnapshot(linkUp = false, ssid = null)
+        }
+
         val connectivityManager =
             context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-        var onWifi = false
-        var resolvedSsid: String? = null
+        var hasLiveWifiTransport = false
+        var ssidFromCapabilities: String? = null
 
-        for (network in connectivityManager.allNetworks) {
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: continue
-            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
+        val activeNetwork = connectivityManager.activeNetwork
+        val activeCapabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
+        if (activeCapabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+            activeCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED)
+        ) {
+            hasLiveWifiTransport = true
+            ssidFromCapabilities = cleanSsid(extractSsidFromCapabilities(activeCapabilities))
+        }
 
-            onWifi = true
-            val ssid = cleanSsid(extractSsid(context, capabilities))
-            if (ssid != null) {
-                return WifiConnectionState(onWifi = true, ssid = ssid)
+        if (!hasLiveWifiTransport || ssidFromCapabilities == null) {
+            for (network in connectivityManager.allNetworks) {
+                val capabilities = connectivityManager.getNetworkCapabilities(network) ?: continue
+                if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
+                if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED)) continue
+                hasLiveWifiTransport = true
+                val candidate = cleanSsid(extractSsidFromCapabilities(capabilities))
+                if (candidate != null) {
+                    ssidFromCapabilities = candidate
+                    break
+                }
             }
         }
 
-        if (!onWifi) {
-            val activeNetwork = connectivityManager.activeNetwork
-            val activeCapabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
-            if (activeCapabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
-                onWifi = true
-                resolvedSsid = cleanSsid(extractSsid(context, activeCapabilities))
-            }
+        if (!hasLiveWifiTransport) {
+            return WifiSnapshot(linkUp = false, ssid = null)
         }
 
-        return WifiConnectionState(onWifi = onWifi, ssid = resolvedSsid)
+        val ssid = cleanSsid(wifiManager.connectionInfo?.ssid) ?: ssidFromCapabilities
+        return WifiSnapshot(linkUp = true, ssid = ssid)
     }
 
-    suspend fun readStateWithRetries(
-        context: Context,
-        maxAttempts: Int = 5,
-        initialDelayMs: Long = 1500,
-        retryDelayMs: Long = 2000,
-        conservative: Boolean = false
-    ): WifiConnectionState {
-        var lastState = WifiConnectionState(onWifi = false, ssid = null)
+    fun captureDisplayState(context: Context): WifiConnectionState {
+        val snapshot = captureSnapshot(context)
+        if (!snapshot.linkUp) {
+            return WifiConnectionState(onWifi = false, ssid = null)
+        }
+        if (snapshot.ssid != null) {
+            return WifiConnectionState(onWifi = true, ssid = snapshot.ssid)
+        }
 
-        for (attempt in 1..maxAttempts) {
-            val state = readState(context)
-            lastState = state
+        val wifiManager =
+            context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val displaySsid = cleanSsid(wifiManager.connectionInfo?.ssid)
+        return WifiConnectionState(onWifi = true, ssid = displaySsid)
+    }
 
-            if (state.onWifi && state.ssid != null) {
-                return state
+    /**
+     * Confirms the device is on the work SSID with two consecutive live reads.
+     * Used only when punched OUT to avoid stale-cache false punch-ins.
+     */
+    suspend fun confirmAtWorkNetwork(context: Context, targetSsid: String): Boolean {
+        var consecutiveMatches = 0
+
+        repeat(3) { attempt ->
+            val snap = captureSnapshot(context)
+            when {
+                !snap.linkUp -> return false
+                snap.ssid == targetSsid -> {
+                    consecutiveMatches++
+                    if (consecutiveMatches >= 2) return true
+                }
+                snap.ssid != null -> return false
+                else -> consecutiveMatches = 0
             }
 
-            // During auto-roam the default network can briefly look disconnected.
-            // When punched in, keep retrying instead of trusting the first miss.
-            if (!conservative && !state.onWifi) {
-                return state
+            if (attempt < 2) delay(1000)
+        }
+
+        return false
+    }
+
+    /**
+     * Confirms the device left the work network.
+     * Tolerates brief roam gaps while punched IN.
+     */
+    suspend fun confirmLeftWorkNetwork(context: Context, targetSsid: String): Boolean {
+        var consecutiveAway = 0
+
+        repeat(5) { attempt ->
+            val snap = captureSnapshot(context)
+            when {
+                !snap.linkUp -> {
+                    consecutiveAway++
+                    if (consecutiveAway >= 2) return true
+                }
+                snap.ssid != null && snap.ssid != targetSsid -> return true
+                snap.ssid == targetSsid -> {
+                    consecutiveAway = 0
+                    return false
+                }
+                else -> consecutiveAway = 0
             }
 
-            if (attempt < maxAttempts) {
-                delay(if (attempt == 1) initialDelayMs else retryDelayMs)
+            if (attempt < 4) {
+                delay(if (attempt == 0) 1500 else 2000)
             }
         }
 
-        return lastState
+        return consecutiveAway >= 2
     }
 
-    private fun extractSsid(context: Context, capabilities: NetworkCapabilities): String? {
+    private fun isSupplicantConnected(wifiManager: WifiManager): Boolean {
+        val info = wifiManager.connectionInfo ?: return false
+        return info.networkId != -1 && info.supplicantState == SupplicantState.COMPLETED
+    }
+
+    private fun extractSsidFromCapabilities(capabilities: NetworkCapabilities): String? {
         val wifiInfo = capabilities.transportInfo as? WifiInfo
-        var ssid = wifiInfo?.ssid
-
-        if (ssid == null || ssid == "<unknown ssid>" || ssid == "0x") {
-            val wifiManager =
-                context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            ssid = wifiManager.connectionInfo?.ssid
-        }
-
-        return ssid
+        return wifiInfo?.ssid
     }
 
     fun cleanSsid(ssid: String?): String? {

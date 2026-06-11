@@ -1,8 +1,49 @@
 package com.example.utils
 
+import com.example.data.Session
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.roundToInt
+
+enum class OutsideBreakType {
+    LUNCH,
+    MORNING_TEA,
+    EVENING_TEA,
+    WARNING,
+    DEDUCTED;
+
+    fun excelTitle(): String = when (this) {
+        LUNCH -> "🍔 Lunch Break"
+        MORNING_TEA -> "☕ Morning Tea Break"
+        EVENING_TEA -> "☕ Evening Tea Break"
+        WARNING -> "⚠️ Outside (Warning)"
+        DEDUCTED -> "Outside (Deducted)"
+    }
+
+    fun breakLabel(duration: String): String = when (this) {
+        LUNCH -> "Lunch break for $duration"
+        MORNING_TEA -> "Tea break for $duration"
+        EVENING_TEA -> "Tea break for $duration"
+        WARNING -> "Outside for $duration"
+        DEDUCTED -> "Outside for $duration"
+    }
+
+    fun breakPrefixEmoji(): String? = when (this) {
+        LUNCH -> "🍔"
+        MORNING_TEA -> "☕"
+        EVENING_TEA -> "☕"
+        WARNING -> "⚠️"
+        DEDUCTED -> null
+    }
+
+    fun excelStatus(): String = when (this) {
+        LUNCH -> "Lunch"
+        MORNING_TEA -> "Morning Tea"
+        EVENING_TEA -> "Evening Tea"
+        WARNING -> "Warning"
+        DEDUCTED -> "Deducted"
+    }
+}
 
 object TimeUtils {
 
@@ -10,9 +51,15 @@ object TimeUtils {
     const val REQUIRED_MINUTES = 470
     const val BUFFER_IN = 5
     const val BUFFER_OUT = 5
+    private const val MORNING_TEA_START_MIN = 8 * 60     // 8:00 am
+    private const val MORNING_TEA_END_MIN = 11 * 60      // 11:00 am inclusive
     private const val LUNCH_WINDOW_START_MIN = 12 * 60   // 12:00 pm
-    private const val LUNCH_WINDOW_END_MIN = 15 * 60     // 3:00 pm
+    private const val LUNCH_WINDOW_END_MIN = 15 * 60     // 3:00 pm exclusive
+    private const val EVENING_TEA_START_MIN = 15 * 60    // 3:00 pm
+    private const val EVENING_TEA_END_MIN = 18 * 60      // 6:00 pm inclusive
+    private const val TEA_MIN_OUTSIDE_SEC = 100          // >= 1m 40s
     private const val LUNCH_MIN_OUTSIDE_SEC = 19 * 60    // > 19 minutes
+    private const val WARNING_MIN_OUTSIDE_SEC = 10 * 60  // > 10 minutes
 
     // "HH:MM" → total minutes
     fun toMin(t: String): Int {
@@ -109,21 +156,64 @@ object TimeUtils {
         }
     }
 
-    fun isLunchBreak(outTimeMs: Long, outsideSeconds: Long): Boolean {
-        if (outsideSeconds <= LUNCH_MIN_OUTSIDE_SEC) return false
+    private fun outMinutesFromMidnight(outTimeMs: Long): Int {
         val calendar = Calendar.getInstance()
         calendar.timeInMillis = outTimeMs
-        val outMin = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
-        return outMin in LUNCH_WINDOW_START_MIN..LUNCH_WINDOW_END_MIN
+        return calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
     }
 
-    fun formatOutsideBreak(outTimeMs: Long, outsideSeconds: Long): String {
-        val duration = fmtDurSeconds(outsideSeconds)
-        return if (isLunchBreak(outTimeMs, outsideSeconds)) {
-            "🍔 Lunch break for $duration"
-        } else {
-            "☕ Outside for $duration"
+    fun classifyOutsideBreak(outTimeMs: Long, outsideSeconds: Long): OutsideBreakType {
+        val outMin = outMinutesFromMidnight(outTimeMs)
+
+        if (outsideSeconds > LUNCH_MIN_OUTSIDE_SEC &&
+            outMin in LUNCH_WINDOW_START_MIN until LUNCH_WINDOW_END_MIN
+        ) {
+            return OutsideBreakType.LUNCH
         }
+
+        if (outsideSeconds >= TEA_MIN_OUTSIDE_SEC &&
+            outMin in MORNING_TEA_START_MIN..MORNING_TEA_END_MIN
+        ) {
+            return OutsideBreakType.MORNING_TEA
+        }
+
+        if (outsideSeconds >= TEA_MIN_OUTSIDE_SEC &&
+            outMin in EVENING_TEA_START_MIN..EVENING_TEA_END_MIN
+        ) {
+            return OutsideBreakType.EVENING_TEA
+        }
+
+        if (outsideSeconds > WARNING_MIN_OUTSIDE_SEC) {
+            return OutsideBreakType.WARNING
+        }
+
+        return OutsideBreakType.DEDUCTED
+    }
+
+    fun isLunchBreak(outTimeMs: Long, outsideSeconds: Long): Boolean =
+        classifyOutsideBreak(outTimeMs, outsideSeconds) == OutsideBreakType.LUNCH
+
+    fun formatOutsideBreak(outTimeMs: Long, outsideSeconds: Long): String {
+        val type = classifyOutsideBreak(outTimeMs, outsideSeconds)
+        val duration = fmtDurSeconds(outsideSeconds)
+        val label = type.breakLabel(duration)
+        val emoji = type.breakPrefixEmoji()
+        return if (emoji != null) "$emoji $label" else label
+    }
+
+    /** Sum of all outside gaps between consecutive sessions (oldest → newest). */
+    fun totalOutsideSeconds(sessions: List<Session>): Long {
+        if (sessions.size < 2) return 0L
+        var total = 0L
+        val chronological = sessions.reversed()
+        chronological.forEachIndexed { index, session ->
+            if (index < chronological.size - 1) {
+                val outTime = session.outTime ?: return@forEachIndexed
+                val outsideSec = (chronological[index + 1].inTime - outTime) / 1000
+                if (outsideSec > 0) total += outsideSec
+            }
+        }
+        return total
     }
 
     // Update the hour and minute of a given timestamp, keeping the date the same

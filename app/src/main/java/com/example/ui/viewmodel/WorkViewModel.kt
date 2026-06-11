@@ -17,6 +17,7 @@ import com.example.data.PreferencesHelper
 import com.example.data.Session
 import com.example.data.Task
 import com.example.data.TaskDao
+import com.example.MainActivity
 import com.example.utils.AutoPunchManager
 import com.example.utils.NotificationHelper
 import com.example.utils.TimeUtils
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -82,11 +84,21 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLocked = MutableStateFlow(prefs.isLocked)
     val isLocked = _isLocked.asStateFlow()
 
+    private val _isAlarmEnabled = MutableStateFlow(prefs.isAlarmEnabled)
+    val isAlarmEnabled = _isAlarmEnabled.asStateFlow()
+
+    private val _isDarkTheme = MutableStateFlow(prefs.isDarkTheme)
+    val isDarkTheme = _isDarkTheme.asStateFlow()
+
     val targetWorkMinutes = MutableStateFlow(prefs.targetWorkMinutes)
 
     // Real-time ticking relative elapsed timer since last Punch In
     private val _liveActiveElapsedSeconds = MutableStateFlow(0L)
     val liveActiveElapsedSeconds = _liveActiveElapsedSeconds.asStateFlow()
+
+    // Ticks every second so session-based leave time stays current
+    private val _clockTick = MutableStateFlow(System.currentTimeMillis())
+    val clockTick = _clockTick.asStateFlow()
 
     // Auto-refresh control jobs
     private var timerJob: Job? = null
@@ -198,6 +210,26 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         checkWifiConnectionInstant()
     }
 
+    fun toggleAlarmEnabled() {
+        setSoundMuted(_isAlarmEnabled.value)
+    }
+
+    fun setDarkTheme(enabled: Boolean) {
+        if (_isDarkTheme.value == enabled) return
+        _isDarkTheme.value = enabled
+        prefs.isDarkTheme = enabled
+    }
+
+    fun setSoundMuted(muted: Boolean) {
+        val enabled = !muted
+        if (_isAlarmEnabled.value == enabled) return
+        _isAlarmEnabled.value = enabled
+        prefs.isAlarmEnabled = enabled
+        if (!enabled) {
+            stopAlarm()
+        }
+    }
+
     fun setConnectedAsWork() {
         val current = _currentSsid.value
         if (!current.isNullOrEmpty()) {
@@ -248,6 +280,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                 val currentSessions = _sessions.value
                 val todayStr = getTodayString()
                 val nowMs = System.currentTimeMillis()
+                _clockTick.value = nowMs
                 val totalMs = calculateWorkedMs(currentSessions, nowMs)
                 val targetMs = prefs.targetWorkMinutes * 60_000L
 
@@ -259,18 +292,15 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                     if (totalMs >= targetMs && targetMs > 0) {
                         if (prefs.alarmedDay != todayStr) {
                             prefs.alarmedDay = todayStr
-                            
-                            _activeAlarm.value = ActiveAlarmState(
-                                title = "🎉 Target Reached!",
-                                message = "Time to leave! You've worked ${TimeUtils.fmtDurSeconds(totalMs / 1000)} today.",
-                                type = AlarmType.WORK_TARGET
-                            )
 
-                            notificationHelper.sendNotification(
-                                "🎉 Target Reached! Time to leave!",
-                                "You've worked ${TimeUtils.fmtDurSeconds(totalMs / 1000)} today",
-                                isTimer = true,
-                                silent = com.example.MainActivity.isForeground
+                            raiseAlarm(
+                                state = ActiveAlarmState(
+                                    title = "🎉 Target Reached!",
+                                    message = "Time to leave! You've worked ${TimeUtils.fmtDurSeconds(totalMs / 1000)} today.",
+                                    type = AlarmType.WORK_TARGET
+                                ),
+                                notificationTitle = "🎉 Target Reached! Time to leave!",
+                                notificationBody = "You've worked ${TimeUtils.fmtDurSeconds(totalMs / 1000)} today"
                             )
                         }
                     } else {
@@ -326,12 +356,17 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                         if (!alreadyAlarmed) {
                             prefs.alarmedDay = todayStr
                         }
-                        notificationHelper.sendNotification(
-                            "🎉 Time to leave!",
-                            "You've worked ${TimeUtils.fmtDurSeconds(progress.workedMs / 1000)} today",
-                            isTimer = !alreadyAlarmed,
-                            silent = com.example.MainActivity.isForeground
-                        )
+                        if (!alreadyAlarmed) {
+                            raiseAlarm(
+                                state = ActiveAlarmState(
+                                    title = "🎉 Time to leave!",
+                                    message = "You've worked ${TimeUtils.fmtDurSeconds(progress.workedMs / 1000)} today.",
+                                    type = AlarmType.WORK_TARGET
+                                ),
+                                notificationTitle = "🎉 Time to leave!",
+                                notificationBody = "You've worked ${TimeUtils.fmtDurSeconds(progress.workedMs / 1000)} today"
+                            )
+                        }
                     }
                 }
                 checkMidnightAndLoadSessions()
@@ -371,8 +406,12 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         return (calculateWorkedMs(sessionList) / 60_000).toInt()
     }
 
-    fun getWorkProgress(sessionList: List<Session>, targetMinutes: Int): WorkProgress {
-        val workedMs = calculateWorkedMs(sessionList)
+    fun getWorkProgress(
+        sessionList: List<Session>,
+        targetMinutes: Int,
+        nowMs: Long = System.currentTimeMillis()
+    ): WorkProgress {
+        val workedMs = calculateWorkedMs(sessionList, nowMs)
         val targetMs = targetMinutes.coerceAtLeast(0) * 60_000L
         val isDone = targetMs > 0 && workedMs >= targetMs
         val percent = when {
@@ -391,6 +430,20 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
             remainingMin = remainingMin,
             isDone = isDone
         )
+    }
+
+    /** null means the user can leave now */
+    fun getDynamicLeaveMin(
+        sessionList: List<Session>,
+        targetMinutes: Int,
+        nowMs: Long = System.currentTimeMillis()
+    ): Int? {
+        val progress = getWorkProgress(sessionList, targetMinutes, nowMs)
+        if (progress.isDone) return null
+        val leaveMs = nowMs + progress.remainingMs
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = leaveMs
+        return calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
     }
 
     override fun onCleared() {
@@ -416,17 +469,14 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
                         _pomodoroIsRunning.value = false
                         val modeName = _pomodoroMode.value.displayName
                         
-                        _activeAlarm.value = ActiveAlarmState(
-                            title = "⏱ Pomodoro Timer Finished",
-                            message = "Your $modeName session is complete.",
-                            type = AlarmType.POMODORO
-                        )
-
-                        notificationHelper.sendNotification(
-                            "⏱ Pomodoro Timer Finished",
-                            "Your $modeName session is complete.",
-                            isTimer = true,
-                            silent = com.example.MainActivity.isForeground
+                        raiseAlarm(
+                            state = ActiveAlarmState(
+                                title = "⏱ Pomodoro Timer Finished",
+                                message = "Your $modeName session is complete.",
+                                type = AlarmType.POMODORO
+                            ),
+                            notificationTitle = "⏱ Pomodoro Timer Finished",
+                            notificationBody = "Your $modeName session is complete."
                         )
                         break
                     }
@@ -443,10 +493,34 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     fun stopAlarm() {
         _activeAlarm.value = null
         notificationHelper.stopAlarmSoundAndVibration()
+        notificationHelper.dismissAlarmNotification()
+    }
+
+    private fun raiseAlarm(
+        state: ActiveAlarmState,
+        notificationTitle: String,
+        notificationBody: String
+    ) {
+        if (!_isAlarmEnabled.value) return
+
+        _activeAlarm.value = state
+
+        val deviceLocked = NotificationHelper.isDeviceLocked(getApplication())
+        val inAppOnly = MainActivity.isForeground && !deviceLocked
+
+        if (!inAppOnly) {
+            notificationHelper.showAlarmNotification(
+                title = notificationTitle,
+                body = notificationBody,
+                silent = MainActivity.isForeground
+            )
+        }
     }
 
     fun playAlarmSoundAndVibration() {
-        notificationHelper.playAlarmSoundAndVibration()
+        if (_isAlarmEnabled.value) {
+            notificationHelper.playAlarmSoundAndVibration()
+        }
     }
 
     fun resetPomodoro() {

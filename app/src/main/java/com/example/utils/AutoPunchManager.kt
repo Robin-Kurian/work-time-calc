@@ -16,9 +16,9 @@ object AutoPunchManager {
 
     suspend fun checkWifiConnection(context: Context) = checkMutex.withLock {
         val prefs = PreferencesHelper(context)
-        if (!prefs.isAutoTrackingEnabled || prefs.isLocked) return
+        if (!prefs.isAutoTrackingEnabled) return
 
-        val targetSsid = WifiConnectionHelper.cleanSsid(prefs.workSsid) ?: return
+        val targetSsid = WifiConnectionHelper.cleanSsid(prefs.workSsid)
 
         val db = AppDatabase.getDatabase(context)
         val todayStr = getTodayString()
@@ -26,6 +26,9 @@ object AutoPunchManager {
         val isIn = currentS.isNotEmpty() && currentS.first().outTime == null
 
         updateDisplayState(context, prefs, targetSsid, isIn)
+
+        // Lock mode pauses auto punch actions, but Wi-Fi banner state must stay live.
+        if (prefs.isLocked || targetSsid == null) return
 
         if (isIn) {
             if (WifiConnectionHelper.confirmLeftWorkNetwork(context, targetSsid)) {
@@ -39,13 +42,13 @@ object AutoPunchManager {
     private fun updateDisplayState(
         context: Context,
         prefs: PreferencesHelper,
-        targetSsid: String,
+        targetSsid: String?,
         isIn: Boolean
     ) {
         val display = WifiConnectionHelper.captureDisplayState(context)
         val detectedSsid = when {
             display.ssid != null -> display.ssid
-            display.onWifi && isIn -> targetSsid
+            display.onWifi && isIn && targetSsid != null -> targetSsid
             else -> null
         }
 

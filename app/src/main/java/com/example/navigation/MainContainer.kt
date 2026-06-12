@@ -3,6 +3,8 @@ package com.example.navigation
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Box
@@ -19,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.example.utils.PermissionUtils
 import com.example.ui.components.AppBottomBar
 import com.example.ui.dialogs.AlarmDialog
 import com.example.ui.screens.focus.FocusScreen
@@ -32,6 +35,31 @@ fun MainContainer(viewModel: WorkViewModel) {
     var selectedTab by rememberSaveable { mutableStateOf(NavigationTab.Today) }
     val activeAlarm by viewModel.activeAlarm.collectAsState()
     val context = LocalContext.current
+    var hasPromptedForRuntimePermissions by rememberSaveable { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        viewModel.onLocationPermissionChanged()
+    }
+
+    val requestMissingPermissions = {
+        val missingPermissions = PermissionUtils.missingRuntimePermissions(context)
+        if (missingPermissions.isNotEmpty()) {
+            permissionLauncher.launch(missingPermissions.toTypedArray())
+        } else {
+            viewModel.onLocationPermissionChanged()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.onLocationPermissionChanged()
+    }
+
+    LaunchedEffect(hasPromptedForRuntimePermissions) {
+        if (hasPromptedForRuntimePermissions) return@LaunchedEffect
+        hasPromptedForRuntimePermissions = true
+        requestMissingPermissions()
+    }
 
     LaunchedEffect(activeAlarm) {
         val activity = context as? ComponentActivity ?: return@LaunchedEffect
@@ -83,9 +111,13 @@ fun MainContainer(viewModel: WorkViewModel) {
                     when (tab) {
                         NavigationTab.Today -> TodayScreen(
                             viewModel = viewModel,
-                            onNavigateToPlan = { selectedTab = NavigationTab.Plan }
+                            onNavigateToPlan = { selectedTab = NavigationTab.Plan },
+                            onRequestPermissions = requestMissingPermissions
                         )
-                        NavigationTab.Plan -> PlanScreen(viewModel = viewModel)
+                        NavigationTab.Plan -> PlanScreen(
+                            viewModel = viewModel,
+                            onRequestPermissions = requestMissingPermissions
+                        )
                         NavigationTab.Focus -> FocusScreen(viewModel = viewModel)
                     }
                 }

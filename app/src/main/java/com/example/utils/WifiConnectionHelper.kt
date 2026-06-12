@@ -23,21 +23,28 @@ data class WifiConnectionState(
 object WifiConnectionHelper {
 
     fun captureSnapshot(context: Context): WifiSnapshot {
+        if (!PermissionUtils.hasLocationPermission(context)) {
+            return WifiSnapshot(linkUp = false, ssid = null)
+        }
         val wifiManager =
-            context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                ?: return WifiSnapshot(linkUp = false, ssid = null)
 
         if (!isSupplicantConnected(wifiManager)) {
             return WifiSnapshot(linkUp = false, ssid = null)
         }
 
         val connectivityManager =
-            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return WifiSnapshot(linkUp = false, ssid = null)
 
         var hasLiveWifiTransport = false
         var ssidFromCapabilities: String? = null
 
-        val activeNetwork = connectivityManager.activeNetwork
-        val activeCapabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
+        val activeNetwork = runCatching { connectivityManager.activeNetwork }.getOrNull()
+        val activeCapabilities = activeNetwork?.let { network ->
+            runCatching { connectivityManager.getNetworkCapabilities(network) }.getOrNull()
+        }
         if (activeCapabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
             activeCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED)
         ) {
@@ -46,8 +53,10 @@ object WifiConnectionHelper {
         }
 
         if (!hasLiveWifiTransport || ssidFromCapabilities == null) {
-            for (network in connectivityManager.allNetworks) {
-                val capabilities = connectivityManager.getNetworkCapabilities(network) ?: continue
+            val allNetworks = runCatching { connectivityManager.allNetworks }.getOrNull().orEmpty()
+            for (network in allNetworks) {
+                val capabilities = runCatching { connectivityManager.getNetworkCapabilities(network) }.getOrNull()
+                    ?: continue
                 if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
                 if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED)) continue
                 hasLiveWifiTransport = true
@@ -63,7 +72,8 @@ object WifiConnectionHelper {
             return WifiSnapshot(linkUp = false, ssid = null)
         }
 
-        val ssid = cleanSsid(wifiManager.connectionInfo?.ssid) ?: ssidFromCapabilities
+        val ssid = runCatching { cleanSsid(wifiManager.connectionInfo?.ssid) }.getOrNull()
+            ?: ssidFromCapabilities
         return WifiSnapshot(linkUp = true, ssid = ssid)
     }
 
@@ -77,9 +87,25 @@ object WifiConnectionHelper {
         }
 
         val wifiManager =
-            context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        val displaySsid = cleanSsid(wifiManager.connectionInfo?.ssid)
+            context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val displaySsid = runCatching { cleanSsid(wifiManager?.connectionInfo?.ssid) }.getOrNull()
         return WifiConnectionState(onWifi = true, ssid = displaySsid)
+    }
+
+    /**
+     * Treat known office SSID variants (for example "ISPG_Staff" and "ISPG_Guest")
+     * as equivalent for auto-tracking decisions.
+     */
+    fun isWorkNetworkMatch(currentSsid: String?, targetSsid: String?): Boolean {
+        if (currentSsid == null || targetSsid == null) return false
+        return isLikelySameWifiFamily(currentSsid, targetSsid)
+    }
+
+    private fun isLikelySameWifiFamily(currentSsid: String, targetSsid: String): Boolean {
+        if (currentSsid == targetSsid) return true
+        val currentFamily = extractFamilyPrefix(currentSsid) ?: return false
+        val targetFamily = extractFamilyPrefix(targetSsid) ?: return false
+        return currentFamily.equals(targetFamily, ignoreCase = true)
     }
 
     /**
@@ -93,7 +119,7 @@ object WifiConnectionHelper {
             val snap = captureSnapshot(context)
             when {
                 !snap.linkUp -> return false
-                snap.ssid == targetSsid -> {
+                isWorkNetworkMatch(snap.ssid, targetSsid) -> {
                     consecutiveMatches++
                     if (consecutiveMatches >= 2) return true
                 }
@@ -121,8 +147,8 @@ object WifiConnectionHelper {
                     consecutiveAway++
                     if (consecutiveAway >= 2) return true
                 }
-                snap.ssid != null && snap.ssid != targetSsid -> return true
-                snap.ssid == targetSsid -> {
+                snap.ssid != null && !isWorkNetworkMatch(snap.ssid, targetSsid) -> return true
+                isWorkNetworkMatch(snap.ssid, targetSsid) -> {
                     consecutiveAway = 0
                     return false
                 }
@@ -138,7 +164,7 @@ object WifiConnectionHelper {
     }
 
     private fun isSupplicantConnected(wifiManager: WifiManager): Boolean {
-        val info = wifiManager.connectionInfo ?: return false
+        val info = runCatching { wifiManager.connectionInfo }.getOrNull() ?: return false
         return info.networkId != -1 && info.supplicantState == SupplicantState.COMPLETED
     }
 
@@ -151,5 +177,10 @@ object WifiConnectionHelper {
         val clean = ssid?.replace("\"", "")?.trim()
         if (clean.isNullOrEmpty() || clean == "<unknown ssid>" || clean == "0x") return null
         return clean
+    }
+
+    private fun extractFamilyPrefix(ssid: String): String? {
+        val firstToken = ssid.trim().split('_', '-', ' ').firstOrNull().orEmpty().trim()
+        return firstToken.takeIf { it.length >= 3 }
     }
 }

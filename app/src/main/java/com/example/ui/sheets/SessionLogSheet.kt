@@ -190,6 +190,7 @@ fun SessionLogSheet(
                             sessionNumber = sessionNumber,
                             durationSec = durationSec,
                             isOpen = isOpen,
+                            isFirstSession = sessionNumber == 1,
                             onEdit = { showEditDialogForSession = session },
                             onDelete = { sessionToDelete = session }
                         )

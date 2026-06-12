@@ -42,6 +42,7 @@ import com.example.ui.dialogs.DurationPickerDialog
 import com.example.ui.theme.AppTheme
 import com.example.ui.viewmodel.WorkViewModel
 import com.example.utils.TimeUtils
+import com.example.utils.formattedAppVersionLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,11 +54,13 @@ fun SettingsSheet(
     workSsid: String,
     currentSsidValue: String?,
     lastCheckedTime: String,
+    onRequestPermissions: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     var showDurationPicker by remember { mutableStateOf(false) }
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val appVersionLabel = remember { formattedAppVersionLabel() }
 
     if (showDurationPicker) {
         DurationPickerDialog(
@@ -81,12 +84,23 @@ fun SettingsSheet(
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp)
         ) {
-            Text(
-                text = "Settings",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = AppTheme.colors.textPrimary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Settings",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AppTheme.colors.textPrimary
+                )
+                Text(
+                    text = appVersionLabel,
+                    fontSize = 12.sp,
+                    color = AppTheme.colors.hintText
+                )
+            }
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
@@ -168,7 +182,7 @@ fun SettingsSheet(
                 isAutoTrackingEnabled = isAutoTrackingEnabled,
                 lastCheckedTime = lastCheckedTime,
                 viewModel = viewModel,
-                requestPermissionsOnMount = true
+                onRequestPermissions = onRequestPermissions
             )
 
             Spacer(modifier = Modifier.height(16.dp))

@@ -49,6 +49,7 @@ import com.example.utils.TimeUtils
 @Composable
 fun PlanScreen(
     viewModel: WorkViewModel,
+    onRequestPermissions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val arrTime by viewModel.arrivalTime.collectAsState()
@@ -101,6 +102,7 @@ fun PlanScreen(
             workSsid = workSsid,
             currentSsidValue = currentSsidValue,
             lastCheckedTime = lastCheckedTime,
+            onRequestPermissions = onRequestPermissions,
             onDismiss = { showSettings = false }
         )
     }

@@ -1,10 +1,5 @@
 package com.example.ui.sheets
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -32,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Wifi
@@ -42,7 +38,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,11 +56,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.example.ui.theme.AppTheme
 import com.example.ui.theme.glassSurface
 import com.example.ui.theme.sheetCardSurface
 import com.example.ui.viewmodel.WorkViewModel
+import com.example.utils.PermissionUtils
+import com.example.utils.WifiConnectionHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,35 +72,13 @@ fun WifiSetupSection(
     lastCheckedTime: String,
     viewModel: WorkViewModel,
     modifier: Modifier = Modifier,
-    requestPermissionsOnMount: Boolean = true
+    onRequestPermissions: () -> Unit
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var isEditingSsid by rememberSaveable { mutableStateOf(false) }
     var localSsidInput by remember(workSsid) { mutableStateOf(workSsid) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        viewModel.checkWifiConnectionInstant()
-    }
-
-    LaunchedEffect(requestPermissionsOnMount) {
-        if (!requestPermissionsOnMount) return@LaunchedEffect
-        val permissionList = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionList.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        val needsLaunch = permissionList.any {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (needsLaunch) {
-            permissionLauncher.launch(permissionList.toTypedArray())
-        }
-    }
+    val hasLocationPermission = PermissionUtils.hasLocationPermission(context)
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse_wifi")
     val pulseAlpha by infiniteTransition.animateFloat(
@@ -125,6 +99,15 @@ fun WifiSetupSection(
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         border = androidx.compose.foundation.BorderStroke(0.dp, Color.Transparent)
     ) {
+        if (!hasLocationPermission) {
+            PermissionInfoBox(
+                onGrantPermissions = onRequestPermissions,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            )
+        }
+
         if (isEditingSsid) {
             Row(
                 modifier = Modifier
@@ -201,10 +184,12 @@ fun WifiSetupSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val isWorkWifiConnected = currentSsidValue != null &&
-                    currentSsidValue == workSsid && workSsid.isNotEmpty()
+                    WifiConnectionHelper.isWorkNetworkMatch(currentSsidValue, workSsid) &&
+                    workSsid.isNotEmpty() && hasLocationPermission
 
                 Column(modifier = Modifier.weight(1f)) {
                     val wifiText = when {
+                        !hasLocationPermission -> "Location permission needed"
                         !isAutoTrackingEnabled -> "Auto-tracking Disabled"
                         isWorkWifiConnected -> "Connected - $currentSsidValue"
                         currentSsidValue != null -> "Not connected ($currentSsidValue)"
@@ -257,8 +242,7 @@ fun WifiSetupSection(
                         Icon(Icons.Outlined.Edit, "Edit SSID", tint = AppTheme.colors.accentGreen, modifier = Modifier.size(16.dp))
                     }
 
-                    val canConnect = currentSsidValue != null &&
-                        currentSsidValue != workSsid && !currentSsidValue.isNullOrEmpty()
+                    val canConnect = !currentSsidValue.isNullOrEmpty() && !isWorkWifiConnected
                     Box(
                         modifier = Modifier
                             .background(
@@ -271,21 +255,29 @@ fun WifiSetupSection(
                                 RoundedCornerShape(100.dp)
                             )
                             .clickable {
-                                if (canConnect) viewModel.setConnectedAsWork()
-                                else viewModel.checkWifiConnectionInstant()
+                                when {
+                                    !hasLocationPermission -> onRequestPermissions()
+                                    canConnect -> viewModel.useCurrentSsidAsWork()
+                                    else -> viewModel.checkWifiConnectionInstant()
+                                }
                             }
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
+                        val actionText = when {
+                            !hasLocationPermission -> "GRANT"
+                            canConnect -> "USE CURRENT"
+                            else -> "REFRESH"
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = if (canConnect) Icons.Outlined.Wifi else Icons.Outlined.Refresh,
-                                contentDescription = if (canConnect) "Connect" else "Refresh",
+                                contentDescription = actionText,
                                 tint = if (canConnect) AppTheme.colors.accentGreen else AppTheme.colors.textPrimary,
                                 modifier = Modifier.size(12.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (canConnect) "CONNECT" else "REFRESH",
+                                text = actionText,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (canConnect) AppTheme.colors.accentGreen else AppTheme.colors.textPrimary
@@ -294,6 +286,64 @@ fun WifiSetupSection(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PermissionInfoBox(
+    onGrantPermissions: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .glassSurface(shape = RoundedCornerShape(12.dp), fillAlpha = 0.52f, elevation = 2.dp)
+            .background(AppTheme.colors.surfaceOverlayMedium, RoundedCornerShape(12.dp))
+            .border(1.dp, AppTheme.colors.cardBorder, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Outlined.Info,
+                contentDescription = null,
+                tint = AppTheme.colors.accentGreen,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Location is used only to read your office Wi-Fi name for auto punch.",
+                fontSize = 11.sp,
+                color = AppTheme.colors.textPrimary,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "No trip or travel tracking.",
+            fontSize = 10.sp,
+            color = AppTheme.colors.mutedText
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .background(
+                    AppTheme.colors.accentGreen.copy(alpha = 0.12f),
+                    RoundedCornerShape(100.dp)
+                )
+                .border(
+                    1.dp,
+                    AppTheme.colors.accentGreen.copy(alpha = 0.3f),
+                    RoundedCornerShape(100.dp)
+                )
+                .clickable(onClick = onGrantPermissions)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = "Grant permissions",
+                fontSize = 10.sp,
+                color = AppTheme.colors.accentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }

@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,7 +55,9 @@ import com.example.ui.sheets.WifiDisconnectedBanner
 import com.example.ui.theme.AppTheme
 import com.example.ui.theme.glassSurface
 import com.example.ui.viewmodel.WorkViewModel
+import com.example.utils.PermissionUtils
 import com.example.utils.TimeUtils
+import com.example.utils.WifiConnectionHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,8 +67,10 @@ import java.util.Locale
 fun TodayScreen(
     viewModel: WorkViewModel,
     onNavigateToPlan: () -> Unit,
+    onRequestPermissions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val sessions by viewModel.sessions.collectAsState()
     val workSsid by viewModel.workSsid.collectAsState()
     val currentSsidValue by viewModel.currentSsid.collectAsState()
@@ -86,7 +91,9 @@ fun TodayScreen(
     val pct = progress.percent
     val isDone = progress.isDone
     val isIn = sessions.any { it.outTime == null }
-    val isWorkWifiConnected = currentSsidValue != null && currentSsidValue == workSsid && workSsid.isNotEmpty()
+    val hasLocationPermission = PermissionUtils.hasLocationPermission(context)
+    val isWorkWifiConnected =
+        workSsid.isNotEmpty() && WifiConnectionHelper.isWorkNetworkMatch(currentSsidValue, workSsid)
 
     val dateSubtitle = remember {
         SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(Date())
@@ -101,6 +108,7 @@ fun TodayScreen(
             workSsid = workSsid,
             currentSsidValue = currentSsidValue,
             lastCheckedTime = lastCheckedTime,
+            onRequestPermissions = onRequestPermissions,
             onDismiss = { showSettings = false }
         )
     }
@@ -251,7 +259,7 @@ fun TodayScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isAutoTrackingEnabled) {
+            if (isAutoTrackingEnabled && hasLocationPermission) {
                 if (!isWorkWifiConnected) {
                     WifiDisconnectedBanner(
                         onTap = { showSettings = true },
@@ -318,15 +326,15 @@ fun TodayScreen(
             val orderedSessions = sessions.sortedByDescending { it.inTime }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 val previewSessions = if (orderedSessions.size == 1) {
-                    listOf(orderedSessions.first() to 1)
+                    listOf(orderedSessions.first() to orderedSessions.size)
                 } else {
                     val currentSession = orderedSessions.firstOrNull { it.outTime == null } ?: orderedSessions.first()
-                    val currentSessionNumber = orderedSessions.indexOf(currentSession) + 1
+                    val currentSessionNumber = orderedSessions.size - orderedSessions.indexOf(currentSession)
                     val firstSession = orderedSessions.last()
 
                     listOf(
                         currentSession to currentSessionNumber,
-                        firstSession to orderedSessions.size
+                        firstSession to 1
                     ).distinctBy { it.first.id }
                 }
 
@@ -340,6 +348,7 @@ fun TodayScreen(
                         sessionNumber = sessionNumber,
                         durationSec = durationSec,
                         isOpen = isOpen,
+                        isFirstSession = sessionNumber == 1,
                         onEdit = { showSessionLog = true },
                         onDelete = { showSessionLog = true }
                     )

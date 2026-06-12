@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.data.PreferencesHelper
 import com.example.utils.AutoPunchManager
+import com.example.utils.PermissionUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +33,7 @@ class WifiMonitoringService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var connectCheckJob: Job? = null
     private var disconnectCheckJob: Job? = null
+    private var periodicCheckJob: Job? = null
 
     private lateinit var connectivityManager: ConnectivityManager
     private lateinit var prefs: PreferencesHelper
@@ -41,6 +43,7 @@ class WifiMonitoringService : Service() {
         private const val NOTIFICATION_ID = 9999
         private const val DISCONNECT_DEBOUNCE_MS = 3000L
         private const val CONNECT_DEBOUNCE_MS = 1500L
+        private const val PERIODIC_CHECK_MS = 60_000L
     }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -67,6 +70,11 @@ class WifiMonitoringService : Service() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         prefs = PreferencesHelper(this)
 
+        if (!PermissionUtils.hasLocationPermission(this)) {
+            stopSelf()
+            return
+        }
+
         createNotificationChannel()
 
         val networkRequest = NetworkRequest.Builder()
@@ -79,14 +87,24 @@ class WifiMonitoringService : Service() {
         }
 
         runWifiCheck(delayMs = 0)
+        startPeriodicWifiChecks()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!PermissionUtils.hasLocationPermission(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val notification = createNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: SecurityException) {
+            stopSelf()
+            return START_NOT_STICKY
         }
         return START_STICKY
     }
@@ -97,6 +115,7 @@ class WifiMonitoringService : Service() {
         super.onDestroy()
         connectCheckJob?.cancel()
         disconnectCheckJob?.cancel()
+        periodicCheckJob?.cancel()
         serviceJob.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
@@ -128,6 +147,16 @@ class WifiMonitoringService : Service() {
         disconnectCheckJob = serviceScope.launch {
             if (delayMs > 0) delay(delayMs)
             AutoPunchManager.checkWifiConnection(applicationContext)
+        }
+    }
+
+    private fun startPeriodicWifiChecks() {
+        periodicCheckJob?.cancel()
+        periodicCheckJob = serviceScope.launch {
+            while (true) {
+                delay(PERIODIC_CHECK_MS)
+                AutoPunchManager.checkWifiConnection(applicationContext)
+            }
         }
     }
 

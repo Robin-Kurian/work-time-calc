@@ -20,6 +20,7 @@ import com.example.data.TaskDao
 import com.example.MainActivity
 import com.example.utils.AutoPunchManager
 import com.example.utils.NotificationHelper
+import com.example.utils.PermissionUtils
 import com.example.utils.TimeUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -177,7 +178,8 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     fun syncWifiService() {
         val context = getApplication<Application>()
         val intent = Intent(context, com.example.services.WifiMonitoringService::class.java)
-        if (_isAutoTrackingEnabled.value) {
+        val hasLocationPermission = PermissionUtils.hasLocationPermission(context)
+        if (_isAutoTrackingEnabled.value && hasLocationPermission) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
@@ -196,11 +198,17 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onLocationPermissionChanged() {
+        syncWifiService()
+        checkWifiConnectionInstant()
+    }
+
     fun toggleAutoTracking() {
         val newState = !_isAutoTrackingEnabled.value
         _isAutoTrackingEnabled.value = newState
         prefs.isAutoTrackingEnabled = newState
         syncWifiService()
+        checkWifiConnectionInstant()
     }
 
     fun toggleLock() {
@@ -230,7 +238,7 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setConnectedAsWork() {
+    fun useCurrentSsidAsWork() {
         val current = _currentSsid.value
         if (!current.isNullOrEmpty()) {
             updateWorkSsid(current)
@@ -259,6 +267,9 @@ class WorkViewModel(application: Application) : AndroidViewModel(application) {
     fun checkWifiConnectionInstant() {
         viewModelScope.launch {
             val context = getApplication<Application>()
+            if (!PermissionUtils.hasLocationPermission(context)) {
+                return@launch
+            }
             AutoPunchManager.checkWifiConnection(context)
         }
     }

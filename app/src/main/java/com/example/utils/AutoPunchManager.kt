@@ -17,6 +17,10 @@ object AutoPunchManager {
     suspend fun checkWifiConnection(context: Context) = checkMutex.withLock {
         val prefs = PreferencesHelper(context)
         if (!prefs.isAutoTrackingEnabled) return
+        if (!PermissionUtils.hasLocationPermission(context)) {
+            prefs.currentSsid = null
+            return
+        }
 
         val targetSsid = WifiConnectionHelper.cleanSsid(prefs.workSsid)
 

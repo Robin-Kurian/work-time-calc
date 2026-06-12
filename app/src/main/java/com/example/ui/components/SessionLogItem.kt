@@ -43,11 +43,17 @@ fun SessionLogItem(
     sessionNumber: Int,
     durationSec: Long,
     isOpen: Boolean,
+    isFirstSession: Boolean = false,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val itemBorder = if (isOpen) AppTheme.colors.accentGreenBorder else AppTheme.colors.cardBorder
+    val sessionLabel = when {
+        isOpen -> "Current session"
+        isFirstSession -> "First session"
+        else -> "Session $sessionNumber"
+    }
 
     Card(
         modifier = modifier
@@ -77,7 +83,7 @@ fun SessionLogItem(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Session $sessionNumber",
+                            text = sessionLabel,
                             fontSize = 12.sp,
                             color = AppTheme.colors.mutedText,
                             fontWeight = FontWeight.Bold
